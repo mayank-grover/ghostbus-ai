@@ -93,3 +93,11 @@ python -m bot.bot
 - [ ] Train & integrate ML ghost bus prediction model in `model/`
 - [ ] Expand FastAPI backend endpoints (`/stops`, `/predictions`, `/alerts`)
 - [ ] Wire Telegram bot handlers to backend API endpoints
+
+## Known data limitations
+
+- Service dates `20260812` and `20260815` are excluded from training and labeling. They contain only partial-day spillover from adjacent archives (`20260813` and `20260816`), not full days of observations, and would distort skip-rate calculations.
+
+## Known assumptions
+
+- The static GTFS schedule may be downloaded after the historical realtime data window of `2026-08-13` through `2026-08-25`. For this POC, we assume no schedule changes occurred during that window. This assumption would need to be verified for production use.
