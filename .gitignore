@@ -78,3 +78,6 @@ data/*.sqlite3
 *.sqlite
 *.sqlite3
 *.gpkg
+
+# Ignore entire data directory (archives, extracted files, DBs)
+data/
