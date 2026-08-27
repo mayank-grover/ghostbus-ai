@@ -17,6 +17,7 @@ def parse_gtfsrt_file(filepath: str) -> list[dict]:
         tu = entity.trip_update
         trip_id = tu.trip.trip_id
         route_id = tu.trip.route_id
+        service_date = tu.trip.start_date if tu.trip.start_date else None
 
         for stu in tu.stop_time_update:
             predicted_time = None
@@ -33,6 +34,7 @@ def parse_gtfsrt_file(filepath: str) -> list[dict]:
                 "trip_id": trip_id,
                 "route_id": route_id,
                 "stop_id": stu.stop_id,
+                "service_date": service_date,
                 "scheduled_time": None,
                 "predicted_time": predicted_time,
                 "delay_seconds": delay_seconds,
