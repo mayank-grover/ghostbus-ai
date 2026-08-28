@@ -10,7 +10,7 @@ export default function TripCard({ trip, stopName }) {
   const formattedDelay = formatDelay(trip.last_known_delay_seconds);
 
   // Route number formatting from route.route_short_name
-  const routeShortName = trip.route_short_name || trip.route_id || 'Bus';
+  const routeShortName = trip.route_short_name || trip.route?.route_short_name || trip.route_id || 'Bus';
   const routeLongName = trip.route?.route_long_name || 'Active Trip';
 
   return (
