@@ -19,6 +19,7 @@ def init_db(conn):
             scheduled_time INTEGER,
             predicted_time INTEGER,
             delay_seconds INTEGER,
+            schedule_relationship INTEGER,
             polled_at INTEGER,
             source TEXT
         )
@@ -59,6 +60,7 @@ def flush(conn, batch):
             scheduled_time,
             predicted_time,
             delay_seconds,
+            schedule_relationship,
             polled_at,
             source
         )
@@ -70,6 +72,7 @@ def flush(conn, batch):
             :scheduled_time,
             :predicted_time,
             :delay_seconds,
+            :schedule_relationship,
             :polled_at,
             :source
         )
