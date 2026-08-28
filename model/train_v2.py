@@ -103,3 +103,21 @@ for t in thresholds_to_check:
 
 model.save_model("model/skip_model_v2.json")
 print("\nModel saved to model/skip_model_v2.json")
+# Error analysis at the high-confidence threshold
+import numpy as np
+df_test = df[test_mask].copy()
+df_test['prob'] = probs
+df_test['pred_at_99'] = (df_test['prob'] >= 0.99).astype(int)
+
+false_positives = df_test[(df_test['pred_at_99'] == 1) & (df_test['is_skip'] == 0)]
+false_negatives = df_test[(df_test['pred_at_99'] == 0) & (df_test['is_skip'] == 1)]
+
+print("\n--- False Positive characteristics (n=%d) ---" % len(false_positives))
+print(false_positives[['route_skip_rate', 'last_known_delay', 'prior_skips_this_trip', 'stops_remaining']].describe())
+
+print("\n--- False Negative characteristics (n=%d) ---" % len(false_negatives))
+print(false_negatives[['route_skip_rate', 'last_known_delay', 'prior_skips_this_trip', 'stops_remaining']].describe())
+
+print("\n--- True Positive characteristics for comparison ---")
+true_positives = df_test[(df_test['pred_at_99'] == 1) & (df_test['is_skip'] == 1)]
+print(true_positives[['route_skip_rate', 'last_known_delay', 'prior_skips_this_trip', 'stops_remaining']].describe())
