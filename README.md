@@ -101,3 +101,9 @@ python -m bot.bot
 ## Known assumptions
 
 - The static GTFS schedule may be downloaded after the historical realtime data window of `2026-08-13` through `2026-08-25`. For this POC, we assume no schedule changes occurred during that window. This assumption would need to be verified for production use.
+
+## Phase 4 results (final, leak-checked)
+- Real skip rate (ground truth via GTFS-RT schedule_relationship): 0.19%
+- Model: XGBoost, trained on route/stop historical skip rates (train-only, no leakage), trip-in-progress signals (prior skips, delay trend), and time features
+- PR-AUC: 0.52
+- At threshold 0.99: 82% precision, 47% recall (2,023 alerts, 1,661 true positives, 362 false positives on 2-day holdout)
