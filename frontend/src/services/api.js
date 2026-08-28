@@ -42,3 +42,20 @@ export async function getStopRisk(stopId) {
 
   return await response.json();
 }
+
+/**
+ * Fetch top active high-risk stops across current live trips.
+ * Calls GET /api/v1/live-activity?limit=<limit>
+ */
+export async function getLiveActivity(limit = 20) {
+  const url = `${API_BASE_URL}/live-activity?limit=${encodeURIComponent(limit)}`;
+  
+  const response = await fetch(url);
+  
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to fetch live activity with status ${response.status}`);
+  }
+
+  return await response.json();
+}

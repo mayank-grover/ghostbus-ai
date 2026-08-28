@@ -325,5 +325,112 @@ async def search_stops(q: str, limit: int = 20):
     }
 
 
+@app.get("/api/v1/live-activity", tags=["Live Activity"])
+async def get_live_activity(limit: int = 20):
+    """
+    Fetch current GTFS-RT trip updates, aggregate skip predictions by stop,
+    and return the highest-risk active stops.
+    """
+
+    limit = min(max(limit, 1), 100)
+
+    try:
+        feed = await fetch_trip_updates()
+        predictor = get_predictor()
+        gtfs_lookup = get_gtfs_lookup()
+
+        stop_predictions = {}
+
+        for entity in feed.entity:
+            if not entity.HasField("trip_update"):
+                continue
+
+            features_list = extract_trip_features(entity.trip_update)
+
+            for feature in features_list:
+                stop_id = feature["stop_id"]
+                result = predictor.predict(
+                    route_id=feature["route_id"],
+                    stop_id=stop_id,
+                    prior_skips_this_trip=feature["prior_skips_this_trip"],
+                    last_known_delay=feature["last_known_delay"],
+                    has_known_delay=feature["has_known_delay"],
+                    stops_remaining=feature["stops_remaining"],
+                )
+
+                if stop_id not in stop_predictions:
+                    stop_predictions[stop_id] = []
+
+                stop_predictions[stop_id].append({
+                    "trip_id": feature["trip_id"],
+                    "route_id": feature["route_id"],
+                    "skip_probability": result["skip_probability"],
+                    "high_confidence_alert": result["high_confidence_alert"],
+                })
+
+        stops_summary = []
+
+        for stop_id, trips in stop_predictions.items():
+            stop_metadata = gtfs_lookup.get_stop_metadata(stop_id)
+            stop_name = (
+                stop_metadata["stop_name"]
+                if stop_metadata
+                else f"Stop {stop_id}"
+            )
+            lat = stop_metadata["latitude"] if stop_metadata else 0.0
+            lon = stop_metadata["longitude"] if stop_metadata else 0.0
+
+            trips.sort(key=lambda t: t["skip_probability"], reverse=True)
+            top_trip_data = trips[0] if trips else None
+
+            top_trip = None
+            if top_trip_data:
+                route_meta = gtfs_lookup.get_route_metadata(
+                    top_trip_data["route_id"]
+                )
+                route_short_name = (
+                    route_meta["route_short_name"]
+                    if route_meta and "route_short_name" in route_meta
+                    else top_trip_data["route_id"]
+                )
+                top_trip = {
+                    "trip_id": top_trip_data["trip_id"],
+                    "route_id": top_trip_data["route_id"],
+                    "route_short_name": route_short_name,
+                }
+
+            highest_skip_prob = trips[0]["skip_probability"] if trips else 0.0
+            has_alert = any(t["high_confidence_alert"] for t in trips)
+
+            stops_summary.append({
+                "stop_id": stop_id,
+                "stop_name": stop_name,
+                "latitude": lat,
+                "longitude": lon,
+                "prediction_count": len(trips),
+                "highest_skip_probability": highest_skip_prob,
+                "high_confidence_alert": has_alert,
+                "top_trip": top_trip,
+            })
+
+        stops_summary.sort(
+            key=lambda s: s["highest_skip_probability"],
+            reverse=True,
+        )
+
+        top_stops = stops_summary[:limit]
+
+        return {
+            "active_stop_count": len(top_stops),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "stops": top_stops,
+        }
+
+    except Exception as e:
+        logger.exception("Live activity fetch failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)
+

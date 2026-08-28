@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Header from './components/Header';
 import StopSearch from './components/StopSearch';
+import LiveActivityPanel from './components/LiveActivityPanel';
 import StopRiskDashboard from './components/StopRiskDashboard';
 import { InitialState, LoadingState, ErrorState } from './components/UIStates';
 import { getStopRisk } from './services/api';
@@ -30,12 +31,10 @@ export default function App() {
       setError(null);
     } catch (err) {
       console.error('Failed to fetch stop risk:', err);
-      // Only show full error screen if we don't have risk data yet
       if (!isBackground) {
         setError(err.message || 'Failed to connect to GhostBus AI API backend.');
         setRiskData(null);
       }
-      // Background failure preserves existing riskData silently
     } finally {
       if (!isBackground) {
         setIsLoading(false);
@@ -51,15 +50,12 @@ export default function App() {
       return;
     }
 
-    // 1. Immediate fetch when stop is selected
     fetchRiskForStop(selectedStop.stop_id, false);
 
-    // 2. Set up 20-second automatic background refresh
     const intervalId = setInterval(() => {
       fetchRiskForStop(selectedStop.stop_id, true);
     }, 20000);
 
-    // 3. Cleanup interval on stop change or unmount
     return () => clearInterval(intervalId);
   }, [selectedStop, fetchRiskForStop]);
 
@@ -79,6 +75,11 @@ export default function App() {
 
       <main>
         <StopSearch onSelectStop={handleSelectStop} currentStop={selectedStop} />
+
+        <LiveActivityPanel
+          onSelectStop={handleSelectStop}
+          currentStopId={selectedStop?.stop_id}
+        />
 
         {isLoading ? (
           <LoadingState stopName={selectedStop?.stop_name} />
