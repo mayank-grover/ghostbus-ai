@@ -18,11 +18,18 @@ logger = logging.getLogger("ghostbus-predictor")
 ARTIFACTS_DIR = Path(__file__).resolve().parent / "model_artifacts"
 
 FEATURE_COLS = [
-    'hour', 'day_of_week', 'is_weekend', 'prior_skips_this_trip',
-    'last_known_delay', 'has_known_delay', 'stops_remaining',
-    'route_skip_rate', 'route_count',
-    'route_hour_skip_rate', 'route_hour_count',
-    'stop_skip_rate', 'stop_count', 'delay_trend'
+    'hour',
+    'day_of_week',
+    'is_weekend',
+    'prior_skips_this_trip',
+    'last_known_delay',
+    'has_known_delay',
+    'stops_remaining',
+    'delay_trend',
+    'route_skip_rate',
+    'route_count',
+    'route_hour_skip_rate',
+    'route_hour_count',
 ]
 
 
@@ -82,7 +89,6 @@ class SkipPredictor:
         is_weekend = 1 if day_of_week in (5, 6) else 0
 
         route_skip_rate, route_count = self._lookup_route(route_id)
-        stop_skip_rate, stop_count = self._lookup_stop(stop_id)
         route_hour_skip_rate, route_hour_count = self._lookup_route_hour(route_id, hour)
 
         # delay_trend needs a "previous" delay to compare against; without
@@ -102,8 +108,6 @@ class SkipPredictor:
             'route_count': route_count,
             'route_hour_skip_rate': route_hour_skip_rate,
             'route_hour_count': route_hour_count,
-            'stop_skip_rate': stop_skip_rate,
-            'stop_count': stop_count,
             'delay_trend': delay_trend,
         }])[FEATURE_COLS].astype('float32')
 
@@ -115,8 +119,6 @@ class SkipPredictor:
             "features_used": {
                 "route_skip_rate": route_skip_rate,
                 "route_count": route_count,
-                "stop_skip_rate": stop_skip_rate,
-                "stop_count": stop_count,
                 "route_hour_skip_rate": route_hour_skip_rate,
                 "route_hour_count": route_hour_count,
                 "hour": hour,

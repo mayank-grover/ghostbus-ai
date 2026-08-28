@@ -54,11 +54,20 @@ df = df.merge(route_hour_stats, on=['route_id', 'hour'], how='left')
 del train_df, stop_stats, route_stats, route_hour_stats
 gc.collect()
 
-feature_cols = ['hour', 'day_of_week', 'is_weekend', 'prior_skips_this_trip',
-                'last_known_delay', 'has_known_delay', 'stops_remaining',
-                'route_skip_rate', 'route_count',
-                'route_hour_skip_rate', 'route_hour_count',
-                'stop_skip_rate', 'stop_count', 'delay_trend']
+feature_cols = [
+    'hour',
+    'day_of_week',
+    'is_weekend',
+    'prior_skips_this_trip',
+    'last_known_delay',
+    'has_known_delay',
+    'stops_remaining',
+    'delay_trend',
+    'route_skip_rate',
+    'route_count',
+    'route_hour_skip_rate',
+    'route_hour_count',
+]
 
 X = df[feature_cols].copy()
 for col in X.columns:
