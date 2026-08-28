@@ -1,3 +1,4 @@
+from pathlib import Path
 """
 GhostBus AI - FastAPI Backend Service
 
@@ -7,6 +8,7 @@ stop predictions, and ghost bus alerts.
 """
 
 import logging
+import csv
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException
@@ -300,11 +302,13 @@ async def get_stop_risk(stop_id: str):
 
 
 @app.get("/api/v1/stops/search", tags=["Stops"])
-async def search_stops(q: str, limit: int = 20):
+def search_stops(q: str, limit: int = 20):
     """
     Search static GTFS stops by name.
-    """
 
+    Uses stops.txt directly so search does not initialize the
+    full GTFS lookup (which also loads the much larger stop_times.txt).
+    """
     if not q.strip():
         raise HTTPException(
             status_code=400,
@@ -312,16 +316,33 @@ async def search_stops(q: str, limit: int = 20):
         )
 
     limit = min(max(limit, 1), 50)
+    query = q.strip().lower()
 
-    stops = get_gtfs_lookup().search_stops(
-        query=q,
-        limit=limit,
-    )
+    stops_file = Path(__file__).resolve().parent.parent / "data" / "gtfs_static" / "stops.txt"
+
+    matches = []
+
+    with open(stops_file, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+
+        for row in reader:
+            stop_name = row.get("stop_name", "")
+
+            if query in stop_name.lower():
+                matches.append({
+                    "stop_id": row["stop_id"],
+                    "stop_name": stop_name,
+                    "latitude": float(row["stop_lat"]),
+                    "longitude": float(row["stop_lon"]),
+                })
+
+                if len(matches) >= limit:
+                    break
 
     return {
         "query": q,
-        "count": len(stops),
-        "stops": stops,
+        "count": len(matches),
+        "stops": matches,
     }
 
 
