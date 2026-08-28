@@ -15,6 +15,9 @@ from pydantic import BaseModel
 import uvicorn
 
 from backend.predictor import get_predictor
+from backend.live_data import fetch_trip_updates
+from backend.live_features import extract_trip_features
+from backend.gtfs_lookup import get_gtfs_lookup
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ghostbus-backend")
@@ -90,6 +93,237 @@ async def predict_skip(request: PredictionRequest):
 # TODO: Initialize database session management for storing user stop subscriptions
 # TODO: Wire live GTFS-RT poller to compute prior_skips_this_trip / last_known_delay
 #       automatically instead of requiring caller to supply them
+
+@app.get("/api/v1/live-predictions", tags=["Live Prediction"])
+async def get_live_predictions():
+    """
+    Fetch current SL GTFS-RT data and return skip predictions
+    for all stops present in active trip updates.
+    """
+
+    try:
+        feed = await fetch_trip_updates()
+        predictor = get_predictor()
+
+        predictions = []
+
+        for entity in feed.entity:
+            if not entity.HasField("trip_update"):
+                continue
+
+            features_list = extract_trip_features(entity.trip_update)
+
+            for feature in features_list:
+                result = predictor.predict(
+                    route_id=feature["route_id"],
+                    stop_id=feature["stop_id"],
+                    prior_skips_this_trip=feature["prior_skips_this_trip"],
+                    last_known_delay=feature["last_known_delay"],
+                    has_known_delay=feature["has_known_delay"],
+                    stops_remaining=feature["stops_remaining"],
+                )
+
+                predictions.append({
+                    "trip_id": feature["trip_id"],
+                    "route_id": feature["route_id"],
+                    "stop_id": feature["stop_id"],
+                    "stop_sequence": feature["stop_sequence"],
+                    "live_features": {
+                        "prior_skips_this_trip": feature["prior_skips_this_trip"],
+                        "last_known_delay": feature["last_known_delay"],
+                        "has_known_delay": feature["has_known_delay"],
+                        "stops_remaining": feature["stops_remaining"],
+                    },
+                    **result,
+                })
+
+        return {
+            "prediction_count": len(predictions),
+            "predictions": predictions,
+        }
+
+    except Exception as e:
+        logger.exception("Live prediction failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/live-predictions/{stop_id}", tags=["Live Prediction"])
+async def get_stop_live_predictions(stop_id: str):
+    """
+    Return live skip predictions only for a specific stop.
+    """
+
+    try:
+        feed = await fetch_trip_updates()
+        predictor = get_predictor()
+
+        predictions = []
+
+        for entity in feed.entity:
+            if not entity.HasField("trip_update"):
+                continue
+
+            features_list = extract_trip_features(entity.trip_update)
+
+            for feature in features_list:
+                if feature["stop_id"] != stop_id:
+                    continue
+
+                result = predictor.predict(
+                    route_id=feature["route_id"],
+                    stop_id=feature["stop_id"],
+                    prior_skips_this_trip=feature["prior_skips_this_trip"],
+                    last_known_delay=feature["last_known_delay"],
+                    has_known_delay=feature["has_known_delay"],
+                    stops_remaining=feature["stops_remaining"],
+                )
+
+                predictions.append({
+                    "trip_id": feature["trip_id"],
+                    "route_id": feature["route_id"],
+                    "stop_id": feature["stop_id"],
+                    "stop_sequence": feature["stop_sequence"],
+                    "live_features": {
+                        "prior_skips_this_trip": feature["prior_skips_this_trip"],
+                        "last_known_delay": feature["last_known_delay"],
+                        "has_known_delay": feature["has_known_delay"],
+                        "stops_remaining": feature["stops_remaining"],
+                    },
+                    **result,
+                })
+
+        stop_metadata = get_gtfs_lookup().get_stop_metadata(stop_id)
+
+        if stop_metadata is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Stop {stop_id} not found in static GTFS data",
+            )
+
+        return {
+            **stop_metadata,
+            "prediction_count": len(predictions),
+            "predictions": predictions,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logger.exception("Targeted live prediction failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/stops/{stop_id}/risk", tags=["Stop Risk"])
+async def get_stop_risk(stop_id: str):
+    """
+    Return a clean, user-facing live skip-risk summary for a stop.
+    """
+
+    try:
+        stop_metadata = get_gtfs_lookup().get_stop_metadata(stop_id)
+
+        if stop_metadata is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Stop {stop_id} not found in static GTFS data",
+            )
+
+        feed = await fetch_trip_updates()
+        predictor = get_predictor()
+
+        trips = []
+
+        for entity in feed.entity:
+            if not entity.HasField("trip_update"):
+                continue
+
+            features_list = extract_trip_features(entity.trip_update)
+
+            for feature in features_list:
+                if feature["stop_id"] != stop_id:
+                    continue
+
+                result = predictor.predict(
+                    route_id=feature["route_id"],
+                    stop_id=feature["stop_id"],
+                    prior_skips_this_trip=feature["prior_skips_this_trip"],
+                    last_known_delay=feature["last_known_delay"],
+                    has_known_delay=feature["has_known_delay"],
+                    stops_remaining=feature["stops_remaining"],
+                )
+
+                route_metadata = get_gtfs_lookup().get_route_metadata(
+                    feature["route_id"]
+                )
+
+                trips.append({
+                    "trip_id": feature["trip_id"],
+                    "route": route_metadata,
+                    "skip_probability": result["skip_probability"],
+                    "high_confidence_alert": result["high_confidence_alert"],
+                    "last_known_delay_seconds": feature["last_known_delay"],
+                    "stops_remaining": feature["stops_remaining"],
+                })
+
+        trips.sort(
+            key=lambda trip: trip["skip_probability"],
+            reverse=True,
+        )
+
+        highest_skip_probability = (
+            trips[0]["skip_probability"]
+            if trips
+            else 0.0
+        )
+
+        return {
+            **stop_metadata,
+            "prediction_count": len(trips),
+            "highest_skip_probability": highest_skip_probability,
+            "high_confidence_alert": any(
+                trip["high_confidence_alert"]
+                for trip in trips
+            ),
+            "trips": trips,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logger.exception("Stop risk prediction failed")
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+        )
+
+
+@app.get("/api/v1/stops/search", tags=["Stops"])
+async def search_stops(q: str, limit: int = 20):
+    """
+    Search static GTFS stops by name.
+    """
+
+    if not q.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Search query cannot be empty",
+        )
+
+    limit = min(max(limit, 1), 50)
+
+    stops = get_gtfs_lookup().search_stops(
+        query=q,
+        limit=limit,
+    )
+
+    return {
+        "query": q,
+        "count": len(stops),
+        "stops": stops,
+    }
+
 
 if __name__ == "__main__":
     uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)
