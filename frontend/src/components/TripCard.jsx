@@ -1,0 +1,64 @@
+import React from 'react';
+import { Clock, MapPin, AlertOctagon, ShieldAlert, Bus } from 'lucide-react';
+import { formatDelay, formatProbability, getRiskLevel, getRiskLabel } from '../utils/formatters';
+
+export default function TripCard({ trip, stopName }) {
+  const skipProb = trip.skip_probability ?? 0;
+  const riskLevel = getRiskLevel(skipProb);
+  const riskLabel = getRiskLabel(skipProb);
+  const formattedSkipPct = formatProbability(skipProb);
+  const formattedDelay = formatDelay(trip.last_known_delay_seconds);
+
+  // Route number formatting from route.route_short_name
+  const routeShortName = trip.route_short_name || trip.route_id || 'Bus';
+  const routeLongName = trip.route?.route_long_name || 'Active Trip';
+
+  return (
+    <div className={`glass-panel trip-card risk-${riskLevel}`}>
+      <div className="trip-header">
+        <div className="route-badge-box">
+          <div className="route-pill" title={`Route ${routeShortName}`}>
+            {routeShortName}
+          </div>
+          <div className="route-details">
+            <span className="route-name">{routeLongName}</span>
+            <span className="trip-id-sub">Trip #{trip.trip_id}</span>
+          </div>
+        </div>
+
+        <div className={`risk-pill ${riskLevel}`}>
+          {trip.high_confidence_alert && <ShieldAlert size={14} />}
+          <span>{formattedSkipPct} {riskLabel}</span>
+        </div>
+      </div>
+
+      <div className="risk-meter">
+        <div className="meter-track">
+          <div
+            className={`meter-fill ${riskLevel}`}
+            style={{ width: `${Math.max(5, Math.min(100, skipProb * 100))}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="trip-info-grid">
+        <div className="info-item" title="Live Schedule Delay">
+          <Clock size={16} />
+          <span>Status: <strong>{formattedDelay}</strong></span>
+        </div>
+
+        <div className="info-item" title="Stops Remaining until arrival">
+          <MapPin size={16} />
+          <span>Stops Left: <strong>{trip.stops_remaining ?? 0}</strong></span>
+        </div>
+
+        {trip.high_confidence_alert && (
+          <div className="info-item" style={{ color: 'var(--risk-high)' }}>
+            <AlertOctagon size={16} />
+            <span><strong>HIGH CONFIDENCE ALERT</strong></span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

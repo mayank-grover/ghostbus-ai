@@ -27,14 +27,17 @@ ghostbus-ai/
 │   ├── __init__.py
 │   └── main.py         # Application entry point & health check route (/health)
 ├── bot/                # Telegram bot application
-│   ├── __init__.py
-│   └── bot.py          # Telegram bot handlers (/start, /stop stub, /help)
 ├── data/               # Local data storage & SQLite database files
-├── ingestion/          # GTFS & GTFS-RT data ingestion scripts (stub)
-├── model/              # ML delay prediction & ghost bus detection models (stub)
+├── frontend/           # React + Vite web dashboard
+│   ├── src/            # React components & API services
+│   ├── index.html      # HTML entry point
+│   ├── package.json    # Frontend dependencies
+│   └── vite.config.js  # Vite server configuration
+├── ingestion/          # GTFS & GTFS-RT data ingestion scripts
+├── model/              # ML delay prediction & ghost bus detection models
 ├── notebooks/          # Exploratory data analysis & model prototyping
 ├── .env.example        # Environment variable template
-├── .gitignore          # Git ignore rules for Python, venv, and environment files
+├── .gitignore          # Git ignore rules
 ├── requirements.txt    # Python dependencies
 └── README.md           # Project documentation
 ```
@@ -70,7 +73,7 @@ Update `.env` with:
 
 ## 🏃 Running the Services
 
-### Run FastAPI Backend
+### 1. Run FastAPI Backend
 
 ```bash
 uvicorn backend.main:app --reload --port 8000
@@ -78,7 +81,19 @@ uvicorn backend.main:app --reload --port 8000
 - Health Check: [http://localhost:8000/health](http://localhost:8000/health)
 - API Documentation (Swagger UI): [http://localhost:8000/docs](http://localhost:8000/docs)
 
-### Run Telegram Bot
+### 2. Run React + Vite Frontend Dashboard
+
+Navigate to the `frontend/` directory, install dependencies (if not already done), and launch the Vite dev server:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+- Web Dashboard: [http://localhost:5173](http://localhost:5173)
+
+### 3. Run Telegram Bot
 
 ```bash
 python -m bot.bot
