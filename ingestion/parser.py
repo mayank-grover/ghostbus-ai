@@ -38,6 +38,7 @@ def parse_gtfsrt_file(filepath: str) -> list[dict]:
                 "scheduled_time": None,
                 "predicted_time": predicted_time,
                 "delay_seconds": delay_seconds,
+                "schedule_relationship": stu.schedule_relationship,
                 "polled_at": feed_timestamp,
                 "source": "koda_archive",
             })
