@@ -194,6 +194,8 @@ async def load_model():
                 "stop_name": row["stop_name"],
                 "latitude": float(row["stop_lat"]),
                 "longitude": float(row["stop_lon"]),
+                "location_type": int(row.get("location_type") or 0),
+                "parent_station": row.get("parent_station") or "",
             }
             for row in reader
         ]
@@ -382,11 +384,13 @@ async def get_stop_live_predictions(stop_id: str):
 @app.get("/api/v1/stops/{stop_id}/risk", tags=["Stop Risk"])
 async def get_stop_risk(stop_id: str):
     """
-    Return a clean, user-facing live skip-risk summary for a stop.
-    """
+    Return a clean, user-facing live skip-risk summary for a stop or station.
 
+    Parent stations aggregate predictions from their child/platform stops.
+    """
     try:
-        stop_metadata = get_gtfs_lookup().get_stop_metadata(stop_id)
+        lookup = get_gtfs_lookup()
+        stop_metadata = lookup.get_stop_metadata(stop_id)
 
         if stop_metadata is None:
             raise HTTPException(
@@ -394,10 +398,37 @@ async def get_stop_risk(stop_id: str):
                 detail=f"Stop {stop_id} not found in static GTFS data",
             )
 
+        # Find the requested stop in the richer search index.
+        requested_stop = next(
+            (
+                stop
+                for stop in STOPS_INDEX
+                if stop["stop_id"] == stop_id
+            ),
+            None,
+        )
+
+        # Normally evaluate the requested stop only.
+        target_stop_ids = {stop_id}
+
+        # If this is a parent station, evaluate all child platforms.
+        if requested_stop and requested_stop.get("location_type") == 1:
+            target_stop_ids.update(
+                stop["stop_id"]
+                for stop in STOPS_INDEX
+                if stop.get("parent_station") == stop_id
+            )
+
+        logger.info(
+            "Stop risk %s: evaluating %d stop IDs",
+            stop_id,
+            len(target_stop_ids),
+        )
+
         feed = await fetch_trip_updates()
         predictor = get_predictor()
 
-        trips = []
+        features = []
 
         for entity in feed.entity:
             if not entity.HasField("trip_update"):
@@ -406,30 +437,28 @@ async def get_stop_risk(stop_id: str):
             features_list = extract_trip_features(entity.trip_update)
 
             for feature in features_list:
-                if feature["stop_id"] != stop_id:
-                    continue
+                if feature["stop_id"] in target_stop_ids:
+                    features.append(feature)
 
-                result = predictor.predict(
-                    route_id=feature["route_id"],
-                    stop_id=feature["stop_id"],
-                    prior_skips_this_trip=feature["prior_skips_this_trip"],
-                    last_known_delay=feature["last_known_delay"],
-                    has_known_delay=feature["has_known_delay"],
-                    stops_remaining=feature["stops_remaining"],
-                )
+        # Batch prediction instead of calling XGBoost once per trip.
+        results = predictor.predict_batch(features)
 
-                route_metadata = get_gtfs_lookup().get_route_metadata(
-                    feature["route_id"]
-                )
+        trips = []
 
-                trips.append({
-                    "trip_id": feature["trip_id"],
-                    "route": route_metadata,
-                    "skip_probability": result["skip_probability"],
-                    "high_confidence_alert": result["high_confidence_alert"],
-                    "last_known_delay_seconds": feature["last_known_delay"],
-                    "stops_remaining": feature["stops_remaining"],
-                })
+        for feature, result in zip(features, results):
+            route_metadata = lookup.get_route_metadata(
+                feature["route_id"]
+            )
+
+            trips.append({
+                "trip_id": feature["trip_id"],
+                "route": route_metadata,
+                "stop_id": feature["stop_id"],
+                "skip_probability": result["skip_probability"],
+                "high_confidence_alert": result["high_confidence_alert"],
+                "last_known_delay_seconds": feature["last_known_delay"],
+                "stops_remaining": feature["stops_remaining"],
+            })
 
         trips.sort(
             key=lambda trip: trip["skip_probability"],
@@ -463,13 +492,14 @@ async def get_stop_risk(stop_id: str):
             detail=str(e),
         )
 
-
 @app.get("/api/v1/stops/search", tags=["Stops"])
 def search_stops(q: str, limit: int = 20):
     """
-    Search the in-memory static GTFS stop index by name.
-    """
+    Search static GTFS stops by name.
 
+    Prefer parent stations when available so users do not
+    accidentally select an individual platform.
+    """
     if not q.strip():
         raise HTTPException(
             status_code=400,
@@ -480,9 +510,32 @@ def search_stops(q: str, limit: int = 20):
     query = q.strip().lower()
 
     matches = []
+    seen_parent_ids = set()
 
+    # First pass: parent stations.
     for stop in STOPS_INDEX:
-        if query in stop["stop_name"].lower():
+        if stop["location_type"] == 1 and query in stop["stop_name"].lower():
+            matches.append(stop)
+            seen_parent_ids.add(stop["stop_id"])
+
+            if len(matches) >= limit:
+                break
+
+    # Second pass: standalone stops / platforms whose parent
+    # was not already returned as a matching station.
+    if len(matches) < limit:
+        for stop in STOPS_INDEX:
+            if stop["location_type"] == 1:
+                continue
+
+            if query not in stop["stop_name"].lower():
+                continue
+
+            parent = stop.get("parent_station", "")
+
+            if parent in seen_parent_ids:
+                continue
+
             matches.append(stop)
 
             if len(matches) >= limit:
