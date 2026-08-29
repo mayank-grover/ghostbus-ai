@@ -1,6 +1,6 @@
 <div align="center">
 
-# 👻🚌 GhostBus AI
+# 🚌 GhostBus AI
 
 **Predicting the skip *before* it happens — not reporting it after.**
 
