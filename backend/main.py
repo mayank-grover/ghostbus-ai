@@ -24,6 +24,8 @@ from backend.gtfs_lookup import get_gtfs_lookup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ghostbus-backend")
 
+STOPS_INDEX = []
+
 app = FastAPI(
     title="GhostBus AI API",
     description="Backend API for GhostBus AI transit monitoring and arrival predictions.",
@@ -41,9 +43,34 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def load_model():
+    global STOPS_INDEX
+
     logger.info("Loading skip prediction model...")
     get_predictor()
     logger.info("Model loaded successfully.")
+
+    stops_file = (
+        Path(__file__).resolve().parent.parent
+        / "data"
+        / "gtfs_static"
+        / "stops.txt"
+    )
+
+    logger.info("Loading stop search index...")
+
+    with open(stops_file, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        STOPS_INDEX = [
+            {
+                "stop_id": row["stop_id"],
+                "stop_name": row["stop_name"],
+                "latitude": float(row["stop_lat"]),
+                "longitude": float(row["stop_lon"]),
+            }
+            for row in reader
+        ]
+
+    logger.info(f"Loaded {len(STOPS_INDEX)} stops into search index.")
 
 
 @app.get("/health", tags=["Health"])
@@ -304,11 +331,9 @@ async def get_stop_risk(stop_id: str):
 @app.get("/api/v1/stops/search", tags=["Stops"])
 def search_stops(q: str, limit: int = 20):
     """
-    Search static GTFS stops by name.
-
-    Uses stops.txt directly so search does not initialize the
-    full GTFS lookup (which also loads the much larger stop_times.txt).
+    Search the in-memory static GTFS stop index by name.
     """
+
     if not q.strip():
         raise HTTPException(
             status_code=400,
@@ -318,26 +343,14 @@ def search_stops(q: str, limit: int = 20):
     limit = min(max(limit, 1), 50)
     query = q.strip().lower()
 
-    stops_file = Path(__file__).resolve().parent.parent / "data" / "gtfs_static" / "stops.txt"
-
     matches = []
 
-    with open(stops_file, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
+    for stop in STOPS_INDEX:
+        if query in stop["stop_name"].lower():
+            matches.append(stop)
 
-        for row in reader:
-            stop_name = row.get("stop_name", "")
-
-            if query in stop_name.lower():
-                matches.append({
-                    "stop_id": row["stop_id"],
-                    "stop_name": stop_name,
-                    "latitude": float(row["stop_lat"]),
-                    "longitude": float(row["stop_lon"]),
-                })
-
-                if len(matches) >= limit:
-                    break
+            if len(matches) >= limit:
+                break
 
     return {
         "query": q,
@@ -349,8 +362,8 @@ def search_stops(q: str, limit: int = 20):
 @app.get("/api/v1/live-activity", tags=["Live Activity"])
 async def get_live_activity(limit: int = 20):
     """
-    Fetch current GTFS-RT trip updates, aggregate skip predictions by stop,
-    and return the highest-risk active stops.
+    Fetch current GTFS-RT trip updates, batch-predict skip risk,
+    aggregate predictions by stop, and return the highest-risk stops.
     """
 
     limit = min(max(limit, 1), 100)
@@ -360,98 +373,93 @@ async def get_live_activity(limit: int = 20):
         predictor = get_predictor()
         gtfs_lookup = get_gtfs_lookup()
 
-        stop_predictions = {}
+        # Extract all live stop contexts first.
+        all_features = []
 
         for entity in feed.entity:
             if not entity.HasField("trip_update"):
                 continue
 
             features_list = extract_trip_features(entity.trip_update)
+            all_features.extend(features_list)
 
-            for feature in features_list:
-                stop_id = feature["stop_id"]
-                result = predictor.predict(
-                    route_id=feature["route_id"],
-                    stop_id=stop_id,
-                    prior_skips_this_trip=feature["prior_skips_this_trip"],
-                    last_known_delay=feature["last_known_delay"],
-                    has_known_delay=feature["has_known_delay"],
-                    stops_remaining=feature["stops_remaining"],
-                )
+        logger.info(
+            "Live activity: extracted %d stop features",
+            len(all_features),
+        )
 
-                if stop_id not in stop_predictions:
-                    stop_predictions[stop_id] = []
+        # One XGBoost inference call instead of one call per stop.
+        results = predictor.predict_batch(all_features)
 
-                stop_predictions[stop_id].append({
-                    "trip_id": feature["trip_id"],
-                    "route_id": feature["route_id"],
-                    "skip_probability": result["skip_probability"],
-                    "high_confidence_alert": result["high_confidence_alert"],
-                })
+        stop_predictions = {}
+
+        for feature, result in zip(all_features, results):
+            stop_id = feature["stop_id"]
+
+            if stop_id not in stop_predictions:
+                stop_predictions[stop_id] = []
+
+            stop_predictions[stop_id].append({
+                "trip_id": feature["trip_id"],
+                "route_id": feature["route_id"],
+                "skip_probability": result["skip_probability"],
+                "high_confidence_alert": result["high_confidence_alert"],
+            })
 
         stops_summary = []
 
         for stop_id, trips in stop_predictions.items():
             stop_metadata = gtfs_lookup.get_stop_metadata(stop_id)
+
             stop_name = (
                 stop_metadata["stop_name"]
                 if stop_metadata
-                else f"Stop {stop_id}"
+                else "Unknown stop"
             )
-            lat = stop_metadata["latitude"] if stop_metadata else 0.0
-            lon = stop_metadata["longitude"] if stop_metadata else 0.0
 
-            trips.sort(key=lambda t: t["skip_probability"], reverse=True)
-            top_trip_data = trips[0] if trips else None
+            highest_probability = max(
+                trip["skip_probability"]
+                for trip in trips
+            )
 
-            top_trip = None
-            if top_trip_data:
-                route_meta = gtfs_lookup.get_route_metadata(
-                    top_trip_data["route_id"]
-                )
-                route_short_name = (
-                    route_meta["route_short_name"]
-                    if route_meta and "route_short_name" in route_meta
-                    else top_trip_data["route_id"]
-                )
-                top_trip = {
-                    "trip_id": top_trip_data["trip_id"],
-                    "route_id": top_trip_data["route_id"],
-                    "route_short_name": route_short_name,
-                }
-
-            highest_skip_prob = trips[0]["skip_probability"] if trips else 0.0
-            has_alert = any(t["high_confidence_alert"] for t in trips)
+            high_confidence = any(
+                trip["high_confidence_alert"]
+                for trip in trips
+            )
 
             stops_summary.append({
                 "stop_id": stop_id,
                 "stop_name": stop_name,
-                "latitude": lat,
-                "longitude": lon,
+                "latitude": (
+                    stop_metadata["latitude"]
+                    if stop_metadata
+                    else None
+                ),
+                "longitude": (
+                    stop_metadata["longitude"]
+                    if stop_metadata
+                    else None
+                ),
                 "prediction_count": len(trips),
-                "highest_skip_probability": highest_skip_prob,
-                "high_confidence_alert": has_alert,
-                "top_trip": top_trip,
+                "highest_skip_probability": highest_probability,
+                "high_confidence_alert": high_confidence,
+                "trips": trips,
             })
 
         stops_summary.sort(
-            key=lambda s: s["highest_skip_probability"],
+            key=lambda stop: stop["highest_skip_probability"],
             reverse=True,
         )
 
-        top_stops = stops_summary[:limit]
-
         return {
-            "active_stop_count": len(top_stops),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "stops": top_stops,
+            "prediction_count": len(all_features),
+            "stop_count": len(stops_summary),
+            "stops": stops_summary[:limit],
         }
 
     except Exception as e:
-        logger.exception("Live activity fetch failed")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-if __name__ == "__main__":
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)
-
+        logger.exception("Live activity prediction failed")
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+        )

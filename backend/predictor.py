@@ -127,6 +127,62 @@ class SkipPredictor:
         }
 
 
+    def predict_batch(self, contexts, current_time=None):
+        """
+        Predict skip probability for multiple live trip/stop contexts
+        in one XGBoost inference call.
+        """
+        if not contexts:
+            return []
+
+        if current_time is None:
+            current_time = datetime.now(timezone.utc)
+
+        hour = current_time.hour
+        day_of_week = current_time.weekday()
+        is_weekend = 1 if day_of_week in (5, 6) else 0
+
+        rows = []
+
+        for context in contexts:
+            route_id = context["route_id"]
+            stop_id = context["stop_id"]
+
+            route_skip_rate, route_count = self._lookup_route(route_id)
+            route_hour_skip_rate, route_hour_count = self._lookup_route_hour(
+                route_id, hour
+            )
+
+            rows.append({
+                "hour": hour,
+                "day_of_week": day_of_week,
+                "is_weekend": is_weekend,
+                "prior_skips_this_trip": context.get("prior_skips_this_trip", 0),
+                "last_known_delay": context.get("last_known_delay", 0.0),
+                "has_known_delay": context.get("has_known_delay", 0),
+                "stops_remaining": context.get("stops_remaining", 0),
+                "delay_trend": 0.0,
+                "route_skip_rate": route_skip_rate,
+                "route_count": route_count,
+                "route_hour_skip_rate": route_hour_skip_rate,
+                "route_hour_count": route_hour_count,
+            })
+
+        features = pd.DataFrame(rows)[FEATURE_COLS].astype("float32")
+
+        probabilities = self.model.predict_proba(features)[:, 1]
+
+        results = []
+
+        for i, probability in enumerate(probabilities):
+            results.append({
+                "skip_probability": float(probability),
+                "high_confidence_alert": float(probability) >= 0.99,
+            })
+
+        return results
+
+
 _predictor_instance = None
 
 def get_predictor() -> SkipPredictor:
