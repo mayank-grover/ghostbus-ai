@@ -14,21 +14,6 @@
 
 ---
 
-## 📖 Table of Contents
-
-- [Where this came from](#-where-this-came-from)
-- [Why it's not running on real CTU data](#-why-its-not-running-on-real-ctu-data)
-- [What it actually does](#-what-it-actually-does)
-- [How it's put together](#️-how-its-put-together)
-- [How well it actually works](#-how-well-it-actually-works)
-- [What's running right now](#-whats-running-right-now)
-- [Repo layout](#-repo-layout)
-- [Running it yourself](#-running-it-yourself)
-- [Things this is not, yet](#-things-this-is-not-yet)
-- [Where I'd like this to go](#-where-id-like-this-to-go)
-
----
-
 ## 🌱 Where this came from
 
 I kept hearing the same complaint from other students in Chandigarh: a CTU bus doesn't stop where it's supposed to, or skips a stop entirely — and you either miss it or end up much farther from where you needed to be. If you're depending on that bus to get to class on time, that's not a minor inconvenience. It's a late arrival, a missed connection, sometimes a genuinely bad start to your day.
