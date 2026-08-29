@@ -9,6 +9,7 @@ stop predictions, and ghost bus alerts.
 
 import logging
 import csv
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException
@@ -26,6 +27,13 @@ logger = logging.getLogger("ghostbus-backend")
 
 STOPS_INDEX = []
 
+LIVE_ACTIVITY_CACHE = {
+    "data": None,
+    "computed_at": None,
+}
+
+LIVE_ACTIVITY_REFRESH_SECONDS = 20
+
 app = FastAPI(
     title="GhostBus AI API",
     description="Backend API for GhostBus AI transit monitoring and arrival predictions.",
@@ -39,6 +47,114 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+async def refresh_live_activity_cache():
+    """Fetch, predict, aggregate, and cache live activity data."""
+    try:
+        feed = await fetch_trip_updates()
+        predictor = get_predictor()
+        gtfs_lookup = get_gtfs_lookup()
+
+        all_features = []
+
+        for entity in feed.entity:
+            if not entity.HasField("trip_update"):
+                continue
+
+            features_list = extract_trip_features(entity.trip_update)
+            all_features.extend(features_list)
+
+        logger.info(
+            "Live activity refresh: extracted %d stop features",
+            len(all_features),
+        )
+
+        results = predictor.predict_batch(all_features)
+
+        stop_predictions = {}
+
+        for feature, result in zip(all_features, results):
+            stop_id = feature["stop_id"]
+
+            if stop_id not in stop_predictions:
+                stop_predictions[stop_id] = []
+
+            stop_predictions[stop_id].append({
+                "trip_id": feature["trip_id"],
+                "route_id": feature["route_id"],
+                "skip_probability": result["skip_probability"],
+                "high_confidence_alert": result["high_confidence_alert"],
+            })
+
+        stops_summary = []
+
+        for stop_id, trips in stop_predictions.items():
+            stop_metadata = gtfs_lookup.get_stop_metadata(stop_id)
+
+            stop_name = (
+                stop_metadata["stop_name"]
+                if stop_metadata
+                else "Unknown stop"
+            )
+
+            highest_probability = max(
+                trip["skip_probability"]
+                for trip in trips
+            )
+
+            high_confidence = any(
+                trip["high_confidence_alert"]
+                for trip in trips
+            )
+
+            stops_summary.append({
+                "stop_id": stop_id,
+                "stop_name": stop_name,
+                "latitude": (
+                    stop_metadata["latitude"]
+                    if stop_metadata
+                    else None
+                ),
+                "longitude": (
+                    stop_metadata["longitude"]
+                    if stop_metadata
+                    else None
+                ),
+                "prediction_count": len(trips),
+                "highest_skip_probability": highest_probability,
+                "high_confidence_alert": high_confidence,
+                "trips": trips,
+            })
+
+        stops_summary.sort(
+            key=lambda stop: stop["highest_skip_probability"],
+            reverse=True,
+        )
+
+        LIVE_ACTIVITY_CACHE["data"] = {
+            "prediction_count": len(all_features),
+            "stop_count": len(stops_summary),
+            "stops": stops_summary,
+        }
+
+        LIVE_ACTIVITY_CACHE["computed_at"] = datetime.now(timezone.utc).isoformat()
+
+        logger.info(
+            "Live activity cache refreshed: %d predictions, %d stops",
+            len(all_features),
+            len(stops_summary),
+        )
+
+    except Exception:
+        logger.exception("Live activity cache refresh failed")
+
+
+async def live_activity_worker():
+    """Continuously refresh live activity in the background."""
+    while True:
+        await refresh_live_activity_cache()
+        await asyncio.sleep(LIVE_ACTIVITY_REFRESH_SECONDS)
 
 
 @app.on_event("startup")
@@ -71,6 +187,14 @@ async def load_model():
         ]
 
     logger.info(f"Loaded {len(STOPS_INDEX)} stops into search index.")
+
+    # Start background live-activity refresh worker.
+    asyncio.create_task(live_activity_worker())
+    logger.info(
+        "Live activity background worker started "
+        "(refresh every %ds)",
+        LIVE_ACTIVITY_REFRESH_SECONDS,
+    )
 
 
 @app.get("/health", tags=["Health"])
@@ -362,104 +486,28 @@ def search_stops(q: str, limit: int = 20):
 @app.get("/api/v1/live-activity", tags=["Live Activity"])
 async def get_live_activity(limit: int = 20):
     """
-    Fetch current GTFS-RT trip updates, batch-predict skip risk,
-    aggregate predictions by stop, and return the highest-risk stops.
-    """
+    Return cached live GTFS-RT activity.
 
+    Live predictions are refreshed by a background worker,
+    so this endpoint does not fetch or run the model itself.
+    """
     limit = min(max(limit, 1), 100)
 
-    try:
-        feed = await fetch_trip_updates()
-        predictor = get_predictor()
-        gtfs_lookup = get_gtfs_lookup()
+    cached = LIVE_ACTIVITY_CACHE["data"]
 
-        # Extract all live stop contexts first.
-        all_features = []
-
-        for entity in feed.entity:
-            if not entity.HasField("trip_update"):
-                continue
-
-            features_list = extract_trip_features(entity.trip_update)
-            all_features.extend(features_list)
-
-        logger.info(
-            "Live activity: extracted %d stop features",
-            len(all_features),
-        )
-
-        # One XGBoost inference call instead of one call per stop.
-        results = predictor.predict_batch(all_features)
-
-        stop_predictions = {}
-
-        for feature, result in zip(all_features, results):
-            stop_id = feature["stop_id"]
-
-            if stop_id not in stop_predictions:
-                stop_predictions[stop_id] = []
-
-            stop_predictions[stop_id].append({
-                "trip_id": feature["trip_id"],
-                "route_id": feature["route_id"],
-                "skip_probability": result["skip_probability"],
-                "high_confidence_alert": result["high_confidence_alert"],
-            })
-
-        stops_summary = []
-
-        for stop_id, trips in stop_predictions.items():
-            stop_metadata = gtfs_lookup.get_stop_metadata(stop_id)
-
-            stop_name = (
-                stop_metadata["stop_name"]
-                if stop_metadata
-                else "Unknown stop"
-            )
-
-            highest_probability = max(
-                trip["skip_probability"]
-                for trip in trips
-            )
-
-            high_confidence = any(
-                trip["high_confidence_alert"]
-                for trip in trips
-            )
-
-            stops_summary.append({
-                "stop_id": stop_id,
-                "stop_name": stop_name,
-                "latitude": (
-                    stop_metadata["latitude"]
-                    if stop_metadata
-                    else None
-                ),
-                "longitude": (
-                    stop_metadata["longitude"]
-                    if stop_metadata
-                    else None
-                ),
-                "prediction_count": len(trips),
-                "highest_skip_probability": highest_probability,
-                "high_confidence_alert": high_confidence,
-                "trips": trips,
-            })
-
-        stops_summary.sort(
-            key=lambda stop: stop["highest_skip_probability"],
-            reverse=True,
-        )
-
+    if cached is None:
         return {
-            "prediction_count": len(all_features),
-            "stop_count": len(stops_summary),
-            "stops": stops_summary[:limit],
+            "prediction_count": 0,
+            "stop_count": 0,
+            "stops": [],
+            "computed_at": None,
+            "status": "warming_up",
         }
 
-    except Exception as e:
-        logger.exception("Live activity prediction failed")
-        raise HTTPException(
-            status_code=500,
-            detail=str(e),
-        )
+    return {
+        "prediction_count": cached["prediction_count"],
+        "stop_count": cached["stop_count"],
+        "stops": cached["stops"][:limit],
+        "computed_at": LIVE_ACTIVITY_CACHE["computed_at"],
+        "status": "ok",
+    }
