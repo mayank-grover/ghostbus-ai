@@ -1,545 +1,273 @@
-# 🚌 GhostBus AI
+<div align="center">
 
-> An ML-powered public transit monitoring system that predicts when an upcoming bus stop is likely to be skipped — turning real-time transit telemetry into actionable passenger alerts.
+# 👻🚌 GhostBus AI
 
-## Why GhostBus AI?
+**Predicting the skip *before* it happens — not reporting it after.**
 
-This project started with a problem I kept hearing from fellow students in Chandigarh.
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)
+![XGBoost](https://img.shields.io/badge/XGBoost-model-EB0028?logo=xgboost&logoColor=white)
+![React](https://img.shields.io/badge/React-frontend-61DAFB?logo=react&logoColor=black)
+![Status](https://img.shields.io/badge/status-proof--of--concept-yellow)
 
-Students would talk about CTU buses unexpectedly skipping stops, not stopping where they expected, or leaving them significantly farther from their college or destination than planned. When you're relying on a bus to get to class, a single missed stop can mean a much longer walk, a missed connection, or being late.
-
-I wanted to build something that could **predict a potentially skipped stop before the bus reaches it**, rather than simply reporting that a bus was already late or that a stop had already been missed.
-
-That led to GhostBus AI.
-
-### Why not build it directly for CTU?
-
-The Chandigarh Transport Undertaking (CTU) operates a substantial city, suburban, and interstate bus network. CTU's official website publishes route maps and timetable information, and CTU states that its operations include computerized systems such as Intelligent Transport Systems (ITS), Automatic Vehicle Location Systems (AVLS), and a Command Control Centre.
-
-However, the public-facing CTU data I could access was not available as the machine-readable GTFS/GTFS-RT feed required to directly train and validate this system against Chandigarh's real-time operations.
-
-So GhostBus AI is currently a **proof of concept**.
-
-Instead of pretending to have access to CTU's internal telemetry, I built the complete pipeline against an available GTFS/GTFS-RT transit dataset from Sweden. This lets me test the core technical question:
-
-> **Can historical stop behavior, route-level patterns, time-of-day information, and live transit telemetry be combined to predict whether a bus is likely to skip an upcoming stop?**
-
-If a comparable public real-time CTU feed becomes available, the same prediction architecture can be adapted to Chandigarh.
+</div>
 
 ---
 
-## 🎯 What the System Does
+## 📖 Table of Contents
 
-GhostBus AI currently focuses on **stop-level skip prediction**.
-
-For an active bus approaching a stop, the system combines:
-
-* Historical skip behavior for the route
-* Historical skip behavior for the stop
-* Route + hour skip patterns
-* Time of day
-* Day of week
-* Whether the trip has already skipped stops
-* Current known delay
-* Number of stops remaining
-* Live GTFS-RT trip updates
-
-The result is a probability that the bus will skip the upcoming stop.
-
-For example:
-
-```text
-Route:              512
-Stop:               Ankdammsgatan
-Stops remaining:    3
-
-Predicted skip probability: 95.9%
-High-confidence alert:      No
-```
-
-The system can then surface high-risk stops through the backend and frontend dashboard.
+- [Where this came from](#-where-this-came-from)
+- [Why it's not running on real CTU data](#-why-its-not-running-on-real-ctu-data)
+- [What it actually does](#-what-it-actually-does)
+- [How it's put together](#️-how-its-put-together)
+- [How well it actually works](#-how-well-it-actually-works)
+- [What's running right now](#-whats-running-right-now)
+- [Repo layout](#-repo-layout)
+- [Running it yourself](#-running-it-yourself)
+- [Things this is not, yet](#-things-this-is-not-yet)
+- [Where I'd like this to go](#-where-id-like-this-to-go)
 
 ---
 
-# 🧠 How It Works
+## 🌱 Where this came from
 
-```text
-             GTFS Static Data
-                    │
-                    ▼
-          ┌───────────────────┐
-          │ Transit Structure │
-          │ routes / stops /  │
-          │ trips / schedules │
-          └─────────┬─────────┘
-                    │
-                    │
-GTFS-RT Feed ───────┤
-                    ▼
-          ┌───────────────────┐
-          │  Data Ingestion   │
-          │  + Event Parsing  │
-          └─────────┬─────────┘
-                    │
-                    ▼
-          ┌───────────────────┐
-          │ Historical Labels │
-          │ & Feature Lookup  │
-          └─────────┬─────────┘
-                    │
-                    ▼
-          ┌───────────────────┐
-          │ XGBoost Predictor  │
-          │                   │
-          │ route behavior    │
-          │ stop behavior     │
-          │ route-hour stats  │
-          │ trip state        │
-          │ time features     │
-          └─────────┬─────────┘
-                    │
-                    ▼
-          ┌───────────────────┐
-          │   FastAPI API     │
-          └─────────┬─────────┘
-                    │
-             ┌──────┴──────┐
-             ▼             ▼
-      React Dashboard   Telegram Bot
-```
+I kept hearing the same complaint from other students in Chandigarh: a CTU bus doesn't stop where it's supposed to, or skips a stop entirely — and you either miss it or end up much farther from where you needed to be. If you're depending on that bus to get to class on time, that's not a minor inconvenience. It's a late arrival, a missed connection, sometimes a genuinely bad start to your day.
 
-## 1. Data Ingestion
+Most transit apps tell you a bus is late **after** it's late. I wanted to know if you could see it coming — flag a stop as high-risk while the bus is still a few stops away, so you'd actually have time to *do* something about it (grab a different bus, walk to a different stop, whatever works).
 
-The `ingestion/` pipeline processes static GTFS data and historical/live GTFS-RT trip updates.
-
-The GTFS-RT parser extracts information such as:
-
-* Trip ID
-* Route ID
-* Stop ID
-* Service date
-* Predicted arrival/departure time
-* Delay
-* Schedule relationship
-* Feed timestamp
-
-Historical observations are aggregated into stop-level events before model training.
+> That question is what GhostBus AI is trying to answer.
 
 ---
 
-## 2. Ground Truth
+## 🇸🇪 Why it's not running on real CTU data
 
-GhostBus AI uses the GTFS-RT `schedule_relationship` field as the ground-truth signal for skipped/cancelled stop events in the current proof of concept.
+I looked into what CTU actually publishes. They talk about having ITS, AVLS, and a Command Control Centre — so the infrastructure for real-time data plausibly exists somewhere internally. But there's no public GTFS-RT feed I could get my hands on to actually build and test against.
 
-The historical dataset contains approximately:
+So instead of faking it or waiting around, I built the **entire pipeline** against a real, public GTFS/GTFS-RT dataset — Stockholm's transit system (SL), via Trafiklab. It's not Chandigarh, but it's real live transit data with the same structure CTU's would have if it were public.
 
-```text
-10.2M+ stop-event records
-~19.8K skip-labelled records
-14 service dates
-```
-
-The overall observed skip rate is approximately:
-
-```text
-0.19%
-```
-
-The extreme class imbalance is one of the main modelling challenges.
+The point right now isn't *"here's how unreliable CTU buses are."* It's **"here's proof this approach actually works end to end on real data."** If a CTU feed ever becomes public, this is built to be pointed at it.
 
 ---
 
-## 3. Feature Engineering
+## 🔮 What it actually does
 
-The model currently uses 12 features:
+For a bus currently en route, the system looks at:
+
+- 📊 how often that **route** skips stops historically
+- 📍 how often that specific **stop** gets skipped
+- 🕐 how that route behaves at **this particular hour**
+- ⚠️ how many stops the bus has **already skipped** on this trip
+- ⏱️ how **delayed** it currently is
+- 🔢 how many stops are **left** before the one you care about
+
+...and turns all of that into a single number: the probability this stop gets skipped.
 
 ```text
-hour
-day_of_week
-is_weekend
-prior_skips_this_trip
-last_known_delay
-has_known_delay
-stops_remaining
-delay_trend
-route_skip_rate
-route_count
-route_hour_skip_rate
-route_hour_count
+Route 512, approaching Ankdammsgatan, 3 stops out
+→ 95.9% chance this stop gets skipped
 ```
 
-Historical route, stop, and route-hour statistics are calculated using **training data only** to avoid leaking future information into the model.
-
-This is particularly important for this problem because a naive historical skip-rate calculation can accidentally include information from the holdout period.
+That's **not** the model saying *"this stop is always bad."* It's combining the stop's history with what this specific bus is doing right now.
 
 ---
 
-## 4. Machine Learning
-
-GhostBus AI currently uses **XGBoost** for binary classification.
-
-The model outputs:
+## 🏗️ How it's put together
 
 ```text
-P(bus skips upcoming stop)
+GTFS static (routes, stops, schedules)
+        │
+        ├──── GTFS-RT live feed
+        │              │
+        ▼              ▼
+   ingestion & historical event parsing
+        │
+        ▼
+   labeled skip events → feature lookups
+        │
+        ▼
+   XGBoost model (trained offline)
+        │
+        ▼
+   FastAPI backend ── serves predictions
+        │
+   ┌────┴────┐
+   ▼         ▼
+React UI   Telegram bot
 ```
 
-rather than simply predicting a binary yes/no result.
+**🎯 Ground truth.** GTFS-RT has a `schedule_relationship` field, and one of its values is *literally* `SKIPPED`. That's the label — no guessing, no inferring it from missing data. Out of about **10.2M** stop-events across 14 service dates, roughly **19.8K** are labeled skips — a skip rate of **~0.19%**. Sounds tiny, but that's also the whole reason this is a hard problem: the model has to learn a rare-event pattern without drowning in false alarms *or* missing the real ones.
 
-This probability can then be converted into different alert levels depending on the desired precision/recall tradeoff.
+**🧬 Features (12 total):** hour, day of week, weekend flag, prior skips on this trip, current delay, whether that delay is even known, stops remaining, delay trend, and skip-rate stats at the route level, the stop level, and the route+hour level. All historical stats are computed from **training data only** — a subtle but important detail, since calculating a stop's "historical skip rate" using data that includes the test period would quietly leak the answer into the model.
 
-For example, the current high-confidence threshold is:
-
-```text
-skip_probability >= 0.99
-```
+**🌲 Model.** XGBoost, binary classification, outputs a *probability* rather than a flat yes/no. Trained on 8.28M examples, tested on 1.83M held out **by date** (not randomly split — that matters for a time-series-flavored problem like this).
 
 ---
 
-# 📊 Model Results
-
-The current model was evaluated using a date-based holdout split rather than a random row split.
-
-### Dataset
+## 📈 How well it actually works
 
 ```text
-Training examples: 8,285,649
-Test examples:     1,834,799
-
-Train skip rate:   0.1924%
-Test skip rate:    0.1925%
+ROC-AUC: 0.876
+PR-AUC:  0.478
 ```
 
-### Overall performance
+PR-AUC is the number that matters more here, because with a 0.19% positive rate, a model that just says *"never skipped"* would already look decent on plain accuracy. It wouldn't be useful, though.
 
-```text
-ROC-AUC: 0.8764
-PR-AUC:  0.4775
-```
-
-PR-AUC is particularly important here because skipped-stop events are extremely rare.
-
-### Threshold = 0.99
-
-```text
-Alerts:    2,318
-True Positives: 1,568
-False Positives: 750
-
-Precision: 67.64%
-Recall:    44.39%
-```
-
-This means the high-confidence alert mode prioritizes precision: roughly two-thirds of alerts correspond to actual skip events in the holdout data, while detecting about 44% of the positive events.
-
-Lower thresholds can increase recall, but at the cost of substantially more false alerts.
+At the current alert threshold (skip probability ≥ 99%):
 
 | Threshold | Alerts | Precision | Recall |
-| --------- | -----: | --------: | -----: |
-| 0.99      |  2,318 |    67.64% | 44.39% |
-| 0.95      |  4,353 |    45.69% | 56.31% |
-| 0.90      |  5,671 |    37.52% | 60.25% |
-| 0.75      |  8,497 |    26.64% | 64.10% |
-| 0.50      | 14,080 |    16.84% | 67.13% |
+|:---:|:---:|:---:|:---:|
+| **0.99** ⭐ | 2,318 | **67.6%** | 44.4% |
+| 0.95 | 4,353 | 45.7% | 56.3% |
+| 0.90 | 5,671 | 37.5% | 60.3% |
+| 0.75 | 8,497 | 26.6% | 64.1% |
+| 0.50 | 14,080 | 16.8% | **67.1%** |
 
-The threshold is therefore a product decision as much as a modelling decision: a passenger alerting system generally needs to avoid overwhelming users with false alarms.
+At 0.99, about **two out of three** alerts are real skips, and it catches roughly **44%** of all skips that happen. Lower the threshold and you catch more skips, but you also start crying wolf a lot more — and for something meant to alert an actual passenger, that matters.
+
+> 🐺 I'd rather it under-alert than become the boy who cried bus.
 
 ---
 
-# 🔬 Example Live Prediction
+## ⚙️ What's running right now
 
-A live prediction currently looks like:
+### 🔧 Backend (FastAPI)
+
+| Endpoint | What it does |
+|---|---|
+| `POST /api/v1/predict` | One-off prediction given route/stop/trip context |
+| `GET /api/v1/stops/{stop_id}/risk` | Live risk for a specific stop (aggregates all platforms if it's a parent station) |
+| `GET /api/v1/live-predictions` | Live predictions across the whole current GTFS-RT feed |
+| `GET /api/v1/stops/search` | Stop name search — served from an in-memory index built once at startup |
+| `GET /api/v1/live-activity` | Highest-risk stops right now, read from a cache |
+
+> ⚡ **Performance note:** `/live-activity` used to run the *entire* fetch → feature → predict → aggregate pipeline inside the HTTP request — about **90 seconds** per call. It now runs on a background loop every 20 seconds and caches the result, so the endpoint itself just reads the cache and returns almost instantly.
+
+### 🖥️ Frontend (React + Vite)
+
+Stop search, a live risk dashboard, a map view, trip cards showing skip probability and delay per bus, a live activity radar, and alert banners for high-confidence predictions.
+
+### 🤖 Telegram bot
+
+Early stage. The idea: pick a stop, see what's coming, get pinged if something you're relying on turns risky — without needing to keep a browser tab open.
+
+---
+
+## 📁 Repo layout
+
+<details>
+<summary>Click to expand</summary>
 
 ```text
-Route:              512
-Stop:               Ankdammsgatan
-Stops remaining:    3
+backend/
+  main.py            FastAPI app, live-activity background worker + cache
+  predictor.py        loads the model + lookup tables, runs predictions (single and batched)
+  gtfs_lookup.py       static GTFS lookups — trip→route, stop metadata, route metadata
+  live_data.py         pulls the live GTFS-RT feed
+  live_features.py     turns a live TripUpdate into model-ready features
 
-Historical route skip rate:       4.05%
-Historical stop skip rate:       83.31%
-Route-hour skip rate:             3.46%
+model/
+  train_v2.py           training script (date-based split, leak-free feature construction)
+  build_labels_v2.py    builds ground-truth skip labels from schedule_relationship
+  export_feature_lookups.py
+  skip_model_v2.json    the trained model artifact
+  lookup_*.csv          historical route/stop/route-hour stats used at inference time
 
-Predicted skip probability:      95.94%
-High-confidence alert:            No
+ingestion/
+  parser.py             GTFS-RT protobuf parsing
+  backfill.py            historical feed ingestion
+  aggregate_events_v2.py / .sql
+
+frontend/
+  src/components/       StopSearch, StopRiskDashboard, LiveActivityPanel, LiveActivityRadar,
+                         LiveRiskMap, RiskDistributionCard, TripCard, AlertBanner, Header, UIStates
+  src/services/api.js    API client
+  src/utils/formatters.js
+
+bot/bot.py               Telegram interface
+
+data/                    local GTFS + SQLite database (not committed)
 ```
 
-The important distinction is that the model does **not** simply say:
-
-> "This stop is skipped often."
-
-Instead, it combines the stop's historical behavior with the current trip's route, time, position within the trip, and other available signals.
+</details>
 
 ---
 
-# 🖥️ Current Interface
+## 🚀 Running it yourself
 
-GhostBus AI includes a React + Vite dashboard for interacting with the prediction API.
-
-The dashboard supports:
-
-* Stop search
-* Live stop risk
-* Route information
-* Trip-level predictions
-* Skip probability visualization
-* Delay information
-* Stops remaining
-* High-confidence alerts
-* Live activity monitoring
-
-The FastAPI backend exposes the underlying prediction and transit data through REST endpoints.
-
----
-
-# 🤖 Telegram Bot
-
-The project is also designed around a Telegram interface so that passengers can eventually query a stop and receive alerts without needing to keep a dashboard open.
-
-The intended interaction is:
-
-```text
-User
- │
- ├── Select stop
- │
- ├── View upcoming buses
- │
- ├── View predicted skip risk
- │
- └── Receive alert if risk becomes high
-```
-
-The Telegram layer is intentionally separated from the prediction system so that the same backend can serve multiple interfaces.
-
----
-
-# 🏗️ Repository Structure
-
-```text
-ghostbus-ai/
-│
-├── backend/
-│   ├── __init__.py
-│   ├── main.py              # FastAPI application
-│   ├── predictor.py         # Live model inference
-│   └── gtfs_lookup.py       # Static GTFS lookup layer
-│
-├── bot/
-│   └── ...                  # Telegram bot
-│
-├── frontend/
-│   ├── src/
-│   │   ├── components/      # React UI components
-│   │   ├── services/        # API client
-│   │   └── ...
-│   ├── index.html
-│   ├── package.json
-│   └── vite.config.js
-│
-├── ingestion/
-│   ├── parser.py            # GTFS-RT protobuf parser
-│   ├── backfill.py          # Historical feed ingestion
-│   ├── aggregate_events_v2.py
-│   └── aggregate_events_v2.sql
-│
-├── model/
-│   ├── train_v2.py          # Model training
-│   ├── build_labels_v2.py   # Ground-truth construction
-│   ├── export_feature_lookups.py
-│   └── ...
-│
-├── notebooks/               # Analysis and experimentation
-│
-├── data/                    # Local datasets / SQLite database
-│
-├── .env.example
-├── .gitignore
-├── requirements.txt
-└── README.md
-```
-
-> Large datasets and generated local artifacts are intentionally kept out of the Git repository.
-
----
-
-# 🚀 Quickstart
-
-## 1. Clone the repository
+**1. Clone & set up the environment**
 
 ```bash
 git clone <repository-url>
 cd ghostbus-ai
-```
-
-## 2. Create a virtual environment
-
-```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env   # fill in TRAFIKLAB_API_KEY, TELEGRAM_BOT_TOKEN
 ```
 
-## 3. Configure environment variables
-
-```bash
-cp .env.example .env
-```
-
-Configure the required credentials in `.env`, such as:
-
-```text
-TRAFIKLAB_API_KEY=...
-TELEGRAM_BOT_TOKEN=...
-```
-
-Do not commit `.env` or API keys.
-
----
-
-# ▶️ Running the Backend
-
-Start FastAPI:
+**2. Start the backend**
 
 ```bash
 uvicorn backend.main:app --reload --port 8000
 ```
+📍 `http://localhost:8000/health` · 📚 `http://localhost:8000/docs`
 
-Health check:
-
-```text
-http://localhost:8000/health
-```
-
-Swagger API documentation:
-
-```text
-http://localhost:8000/docs
-```
-
----
-
-# ▶️ Running the Frontend
-
-In another terminal:
+**3. Start the frontend** *(separate terminal)*
 
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
+📍 `http://localhost:5173`
 
-The Vite development server will normally be available at:
-
-```text
-http://localhost:5173
-```
-
----
-
-# ▶️ Running the Telegram Bot
-
-From the project root:
+**4. Start the Telegram bot** *(optional)*
 
 ```bash
 python -m bot.bot
 ```
 
----
-
-# 🧪 Model Training
-
-The current model can be retrained with:
+**5. Retrain the model** *(optional)*
 
 ```bash
 python model/train_v2.py
 ```
 
-The training pipeline performs a date-based train/test split and constructs historical lookup features from training data only.
+---
 
-The resulting model artifact is written to:
+## ⚠️ Things this is not, yet
 
-```text
-model/skip_model_v2.json
-```
+Being upfront about the limitations, because a proof of concept is only useful if you're honest about where it's still rough:
+
+- 🌍 **It's Swedish data, not Chandigarh data.** The performance numbers say something about whether this modeling *approach* works, not about how reliable CTU buses actually are. Two different claims — I don't want to blur them.
+- 📅 **Two service dates got excluded** (Aug 12 and Aug 15) because they only had partial-day data from adjacent archive files, and including them would've quietly skewed the historical skip rates.
+- 🕰️ **The static schedule and the historical real-time window aren't perfectly time-aligned** — the static GTFS may have been pulled after the Aug 13–25 real-time window it's matched against. Fair assumption for a proof of concept; wouldn't fly in production, which would need properly versioned schedules.
+- 🧩 **The delay-trend feature is currently a placeholder** (fixed at 0) in live inference, since the live poller doesn't yet track a trip's delay history over time the way the training pipeline does retroactively.
+- 🎲 **Skips are rare**, by a lot. That's the whole modeling challenge, and why precision/recall at different thresholds matters more here than plain accuracy — which would look great even with a model that does nothing.
 
 ---
 
-# ⚠️ Data Limitations
+## 🔭 Where I'd like this to go
 
-This project is a proof of concept, and its results should not be interpreted as production-level transit reliability estimates.
+The real goal was never *"tell me the bus is late."* It's answering a more specific question:
 
-### Partial service dates
+> **Can I actually trust this bus to stop where I need it to — or should I already be planning an alternative?**
 
-Service dates `20260812` and `20260815` are excluded from training and labeling because they contain partial-day spillover from adjacent archives rather than complete observation windows.
+For Chandigarh, that means eventually pointing this whole pipeline at a real CTU feed, if one ever becomes publicly available — same architecture, real target audience. Until then, this is the part I can actually build and prove works: real live data in, a real prediction out, fast enough to be useful.
 
-Including them would distort historical skip-rate calculations.
+**Still to do:**
 
-### Static schedule alignment
-
-The static GTFS schedule may have been downloaded after the historical real-time data window of `2026-08-13` through `2026-08-25`.
-
-For this proof of concept, the system assumes that no relevant schedule changes occurred during that window.
-
-A production deployment would need versioned static schedules so that each real-time observation is matched against the schedule that was actually valid at that time.
-
-### Dataset mismatch
-
-The model is currently trained and evaluated using Swedish transit data rather than CTU data.
-
-Therefore, the model's numerical performance **does not represent CTU bus reliability**.
-
-The purpose of the current dataset is to validate the technical feasibility of the prediction pipeline.
-
-### Rare-event classification
-
-Skipped-stop events represent only a small fraction of all observations.
-
-This creates severe class imbalance and makes accuracy a poor metric for evaluating the system. Precision, recall, PR-AUC, and threshold-specific alert quality are more informative.
+- [ ] swap the placeholder delay-trend feature for real live trip history
+- [ ] better probability calibration
+- [ ] richer explanations per prediction (why is *this one* risky, specifically)
+- [ ] finish the Telegram alert flow end to end
+- [ ] versioned schedule handling, for if this ever needs to be production-grade
+- [ ] point it at a real CTU feed, the day that's possible
 
 ---
 
-# 🛣️ Roadmap
+<div align="center">
 
-## Completed
+*Built because a missed stop shouldn't be a surprise.*
 
-* [x] GTFS-RT protobuf parsing
-* [x] Historical transit data ingestion
-* [x] Stop-level event aggregation
-* [x] GTFS static lookup layer
-* [x] Ground-truth skip-event construction
-* [x] Train/test date split
-* [x] Leak-free historical feature generation
-* [x] XGBoost skip prediction model
-* [x] Live model inference
-* [x] FastAPI prediction endpoints
-* [x] React + Vite dashboard
-* [x] Stop search
-* [x] Live stop risk visualization
-* [x] High-confidence prediction alerts
-
-## Next
-
-* [ ] Optimize live-activity inference latency
-* [ ] Add caching/background processing for live predictions
-* [ ] Replace placeholder delay-trend signal with real live trip history
-* [ ] Improve calibration of predicted probabilities
-* [ ] Add richer trip-level explanations
-* [ ] Complete Telegram alert workflow
-* [ ] Evaluate against a public Chandigarh/CTU real-time feed if one becomes available
-* [ ] Build versioned schedule handling for production deployment
-
----
-
-# 🔭 Long-Term Goal
-
-The eventual goal is not simply to predict whether a bus is late.
-
-It is to answer a more useful passenger question:
-
-> **"Can I rely on this bus to actually stop where I need it to?"**
-
-For Chandigarh, that could mean taking a system like GhostBus AI and connecting it to a reliable CTU real-time data source.
-
-A passenger could then select their college or bus stop and receive an alert before an approaching bus becomes a problem — giving them enough time to choose another bus, another stop, or another route.
-
-Until that data is publicly accessible, GhostBus AI serves as a technical proof of concept for how such a system could work.
+</div>
