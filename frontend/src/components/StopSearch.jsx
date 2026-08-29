@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, MapPin, Loader2 } from 'lucide-react';
+import { Search, X, MapPin, Loader2, Command } from 'lucide-react';
 import { searchStops } from '../services/api';
 
 export default function StopSearch({ onSelectStop, currentStop }) {
@@ -90,12 +90,12 @@ export default function StopSearch({ onSelectStop, currentStop }) {
   return (
     <div className="search-wrapper" ref={containerRef}>
       <div className="search-input-box">
-        <Search className="search-icon" size={20} />
+        <Search className="search-icon" size={17} />
         
         <input
           type="text"
           className="search-input"
-          placeholder="Search your bus stop (e.g. Slussen, T-Centralen)..."
+          placeholder="Search bus stops across Stockholm network..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => {
@@ -104,24 +104,26 @@ export default function StopSearch({ onSelectStop, currentStop }) {
           onKeyDown={handleKeyDown}
         />
 
-        {isSearching && (
-          <Loader2 className="search-icon spinner" style={{ left: 'auto', right: '3rem' }} size={18} />
-        )}
-
-        {query && (
+        {isSearching ? (
+          <Loader2 className="search-right-icon spinner" size={16} />
+        ) : query ? (
           <button
             type="button"
             className="clear-btn"
             onClick={handleClear}
             aria-label="Clear search"
           >
-            <X size={18} />
+            <X size={15} />
           </button>
+        ) : (
+          <span className="search-shortcut-tag" title="Search bus stop">
+            <Command size={11} /> K
+          </span>
         )}
       </div>
 
       {isOpen && (
-        <div className="search-dropdown glass-panel">
+        <div className="search-dropdown">
           {results.length > 0 ? (
             results.map((stop, idx) => (
               <button
@@ -135,12 +137,12 @@ export default function StopSearch({ onSelectStop, currentStop }) {
                   <span className="stop-name">{stop.stop_name}</span>
                   <span className="stop-sub">Stop #{stop.stop_id}</span>
                 </div>
-                <MapPin size={16} className="text-muted" style={{ color: 'var(--text-muted)' }} />
+                <MapPin size={14} className="dropdown-pin" />
               </button>
             ))
           ) : (
             !isSearching && (
-              <div style={{ padding: '0.85rem 1rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+              <div className="dropdown-empty">
                 No matching bus stops found.
               </div>
             )

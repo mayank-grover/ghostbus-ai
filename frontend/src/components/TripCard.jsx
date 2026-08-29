@@ -1,5 +1,5 @@
 import React from 'react';
-import { Clock, MapPin, AlertOctagon, ShieldAlert, Bus } from 'lucide-react';
+import { Clock, MapPin, AlertOctagon, ShieldAlert } from 'lucide-react';
 import { formatDelay, formatProbability, getRiskLevel, getRiskLabel } from '../utils/formatters';
 
 export default function TripCard({ trip, stopName }) {
@@ -9,12 +9,11 @@ export default function TripCard({ trip, stopName }) {
   const formattedSkipPct = formatProbability(skipProb);
   const formattedDelay = formatDelay(trip.last_known_delay_seconds);
 
-  // Route number formatting from route.route_short_name
-  const routeShortName = trip.route_short_name || trip.route?.route_short_name || trip.route_id || 'Bus';
+  const routeShortName = trip.route_short_name || trip.route?.route_short_name || trip.route_id || '—';
   const routeLongName = trip.route?.route_long_name || 'Active Trip';
 
   return (
-    <div className={`glass-panel trip-card risk-${riskLevel}`}>
+    <div className={`trip-card risk-${riskLevel}`}>
       <div className="trip-header">
         <div className="route-badge-box">
           <div className="route-pill" title={`Route ${routeShortName}`}>
@@ -27,11 +26,12 @@ export default function TripCard({ trip, stopName }) {
         </div>
 
         <div className={`risk-pill ${riskLevel}`}>
-          {trip.high_confidence_alert && <ShieldAlert size={14} />}
-          <span>{formattedSkipPct} {riskLabel}</span>
+          {trip.high_confidence_alert && <ShieldAlert size={13} />}
+          <span>{formattedSkipPct} · {riskLabel}</span>
         </div>
       </div>
 
+      {/* Probability meter */}
       <div className="risk-meter">
         <div className="meter-track">
           <div
@@ -41,21 +41,22 @@ export default function TripCard({ trip, stopName }) {
         </div>
       </div>
 
+      {/* Telemetry info */}
       <div className="trip-info-grid">
-        <div className="info-item" title="Live Schedule Delay">
-          <Clock size={16} />
+        <div className="info-item" title="Live schedule delay">
+          <Clock size={13} />
           <span>Status: <strong>{formattedDelay}</strong></span>
         </div>
 
-        <div className="info-item" title="Stops Remaining until arrival">
-          <MapPin size={16} />
-          <span>Stops Left: <strong>{trip.stops_remaining ?? 0}</strong></span>
+        <div className="info-item" title="Stops remaining until arrival">
+          <MapPin size={13} />
+          <span>Stops left: <strong>{trip.stops_remaining ?? 0}</strong></span>
         </div>
 
         {trip.high_confidence_alert && (
           <div className="info-item" style={{ color: 'var(--risk-high)' }}>
-            <AlertOctagon size={16} />
-            <span><strong>HIGH CONFIDENCE ALERT</strong></span>
+            <AlertOctagon size={13} />
+            <span><strong>High confidence alert</strong></span>
           </div>
         )}
       </div>

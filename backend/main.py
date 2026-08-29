@@ -555,9 +555,8 @@ async def get_live_activity(limit: int = 20):
 
     Live predictions are refreshed by a background worker,
     so this endpoint does not fetch or run the model itself.
+    Set limit=0 to return all active stops.
     """
-    limit = min(max(limit, 1), 100)
-
     cached = LIVE_ACTIVITY_CACHE["data"]
 
     if cached is None:
@@ -569,10 +568,17 @@ async def get_live_activity(limit: int = 20):
             "status": "warming_up",
         }
 
+    if limit == 0:
+        stops_to_return = cached["stops"]
+    else:
+        limit = min(max(limit, 1), 1000)
+        stops_to_return = cached["stops"][:limit]
+
     return {
         "prediction_count": cached["prediction_count"],
         "stop_count": cached["stop_count"],
-        "stops": cached["stops"][:limit],
+        "stops": stops_to_return,
         "computed_at": LIVE_ACTIVITY_CACHE["computed_at"],
         "status": "ok",
     }
+

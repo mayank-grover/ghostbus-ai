@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Header from './components/Header';
 import StopSearch from './components/StopSearch';
-import LiveActivityPanel from './components/LiveActivityPanel';
+import LiveActivityRadar from './components/LiveActivityRadar';
+import RiskDistributionCard from './components/RiskDistributionCard';
 import StopRiskDashboard from './components/StopRiskDashboard';
-import { InitialState, LoadingState, ErrorState } from './components/UIStates';
-import { getStopRisk } from './services/api';
+import LiveRiskMap from './components/LiveRiskMap';
+import { EmptyStopState, LoadingState, ErrorState } from './components/UIStates';
+import { getStopRisk, getLiveActivity } from './services/api';
 
 export default function App() {
   const [selectedStop, setSelectedStop] = useState(null);
@@ -14,6 +16,45 @@ export default function App() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [error, setError] = useState(null);
 
+  // Live activity dataset state (used by Radar, Distribution, and Map)
+  const [liveStops, setLiveStops] = useState([]);
+  const [isLiveLoading, setIsLiveLoading] = useState(true);
+  const [isLiveRefreshing, setIsLiveRefreshing] = useState(false);
+  const [liveError, setLiveError] = useState(null);
+
+  // 1. Fetch live activity dataset (limit=0 for all active stops)
+  const fetchLiveActivity = useCallback(async (isBackground = false) => {
+    if (!isBackground) {
+      setIsLiveLoading(true);
+      setLiveError(null);
+    } else {
+      setIsLiveRefreshing(true);
+    }
+
+    try {
+      const data = await getLiveActivity(0);
+      setLiveStops(data.stops || []);
+      setLiveError(null);
+    } catch (err) {
+      console.error('Failed to fetch live activity:', err);
+      if (!isBackground) {
+        setLiveError(err.message || 'Failed to fetch live activity telemetry.');
+      }
+    } finally {
+      setIsLiveLoading(false);
+      setIsLiveRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchLiveActivity(false);
+    const intervalId = setInterval(() => {
+      fetchLiveActivity(true);
+    }, 20000);
+    return () => clearInterval(intervalId);
+  }, [fetchLiveActivity]);
+
+  // 2. Fetch targeted stop risk data when a stop is selected
   const fetchRiskForStop = useCallback(async (stopId, isBackground = false) => {
     if (!stopId) return;
 
@@ -63,7 +104,7 @@ export default function App() {
     setSelectedStop(stop);
   };
 
-  const handleManualRefresh = () => {
+  const handleManualRefreshStop = () => {
     if (selectedStop?.stop_id) {
       fetchRiskForStop(selectedStop.stop_id, riskData !== null);
     }
@@ -76,25 +117,47 @@ export default function App() {
       <main>
         <StopSearch onSelectStop={handleSelectStop} currentStop={selectedStop} />
 
-        <LiveActivityPanel
+        {/* Upper 2-Column Dashboard Grid */}
+        <div className="upper-dashboard-grid">
+          {/* Left Column: System Overview (Radar + Risk Distribution) */}
+          <div className="dashboard-left-col">
+            <LiveActivityRadar
+              stops={liveStops}
+              isLoading={isLiveLoading}
+              isRefreshing={isLiveRefreshing}
+              error={liveError}
+              onSelectStop={handleSelectStop}
+              currentStopId={selectedStop?.stop_id}
+              onRefreshLive={() => fetchLiveActivity(liveStops.length > 0)}
+            />
+            <RiskDistributionCard stops={liveStops} isLoading={isLiveLoading} />
+          </div>
+
+          {/* Right Column: Persistent Fixed-Height Current Stop Panel */}
+          <div className="dashboard-right-col stop-panel-container">
+            {isLoading ? (
+              <LoadingState stopName={selectedStop?.stop_name} />
+            ) : error && !riskData ? (
+              <ErrorState message={error} onRetry={handleManualRefreshStop} />
+            ) : riskData ? (
+              <StopRiskDashboard
+                data={riskData}
+                lastUpdated={lastUpdated}
+                isRefreshing={isRefreshing}
+                onRefresh={handleManualRefreshStop}
+              />
+            ) : (
+              <EmptyStopState />
+            )}
+          </div>
+        </div>
+
+        {/* Full-Width Live Risk Map Below Grid */}
+        <LiveRiskMap
+          stops={liveStops}
           onSelectStop={handleSelectStop}
           currentStopId={selectedStop?.stop_id}
         />
-
-        {isLoading ? (
-          <LoadingState stopName={selectedStop?.stop_name} />
-        ) : error && !riskData ? (
-          <ErrorState message={error} onRetry={handleManualRefresh} />
-        ) : riskData ? (
-          <StopRiskDashboard
-            data={riskData}
-            lastUpdated={lastUpdated}
-            isRefreshing={isRefreshing}
-            onRefresh={handleManualRefresh}
-          />
-        ) : (
-          <InitialState />
-        )}
       </main>
     </div>
   );

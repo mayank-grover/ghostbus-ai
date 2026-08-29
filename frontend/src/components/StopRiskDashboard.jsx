@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MapPin, Activity, ShieldAlert, Navigation, RefreshCw, Clock } from 'lucide-react';
+import { MapPin, Activity, ShieldAlert, Navigation, RefreshCw } from 'lucide-react';
 import AlertBanner from './AlertBanner';
 import TripCard from './TripCard';
 import { NoActiveTripsState } from './UIStates';
@@ -42,80 +42,71 @@ export default function StopRiskDashboard({ data, lastUpdated, isRefreshing, onR
   const updatedText = secondsAgo < 5 ? 'Updated just now' : `Updated ${secondsAgo}s ago`;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      {/* Dashboard Top Panel */}
-      <div className="glass-panel dashboard-header">
+    <div className="stop-dashboard-scroll-view">
+      {/* Sticky Xcode/Linear Style Inspector Header */}
+      <div className="stop-header-sticky">
         <div className="stop-title-row">
           <div>
-            <h1 className="stop-title">{stop_name}</h1>
+            <h2 className="stop-title">{stop_name}</h2>
             <div className="stop-meta">
               <span className="meta-chip">
-                <MapPin size={12} /> ID #{stop_id}
+                <MapPin size={11} /> ID #{stop_id}
               </span>
               {latitude !== undefined && longitude !== undefined && (
                 <span className="meta-chip">
-                  <Navigation size={12} /> {latitude.toFixed(4)}, {longitude.toFixed(4)}
+                  <Navigation size={11} /> {latitude.toFixed(4)}, {longitude.toFixed(4)}
                 </span>
               )}
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
             <button
               type="button"
-              className="meta-chip"
+              className="refresh-pill-btn"
               onClick={onRefresh}
               disabled={isRefreshing}
-              style={{
-                cursor: 'pointer',
-                border: '1px solid var(--border-subtle)',
-                background: 'rgba(6, 182, 212, 0.1)',
-                color: 'var(--accent-cyan)',
-                padding: '0.35rem 0.65rem',
-                borderRadius: '0.5rem',
-                transition: 'all 0.2s ease',
-              }}
               title="Click to manually refresh live risk data"
             >
-              <RefreshCw size={12} className={isRefreshing ? 'spinner' : ''} />
-              <span>Live · {isRefreshing ? 'Refreshing...' : updatedText}</span>
+              <RefreshCw size={11} className={isRefreshing ? 'spinner' : ''} />
+              <span>{isRefreshing ? 'Refreshing...' : updatedText}</span>
             </button>
 
-            <div className={`risk-pill ${peakRiskLevel}`} style={{ fontSize: '0.9rem' }}>
+            <span className={`risk-badge ${peakRiskLevel}`} style={{ fontSize: '0.78rem' }}>
               Peak Risk: {formatProbability(highest_skip_probability)}
-            </div>
+            </span>
           </div>
         </div>
 
-        {/* Stats Row */}
-        <div className="stats-grid">
-          <div className="stat-card">
-            <span className="stat-label">Live Trips Tracked</span>
-            <span className="stat-value">{prediction_count}</span>
+        {/* Metric Inspector Grid */}
+        <div className="inspector-stats-grid">
+          <div className="inspector-stat-tile">
+            <span className="stat-tile-label">Live Trips Tracked</span>
+            <span className="stat-tile-value">{prediction_count}</span>
           </div>
 
-          <div className="stat-card">
-            <span className="stat-label">Highest Skip Risk</span>
-            <span className={`stat-value risk-${peakRiskLevel}`} style={{ color: `var(--risk-${peakRiskLevel})` }}>
+          <div className="inspector-stat-tile">
+            <span className="stat-tile-label">Highest Skip Risk</span>
+            <span className={`stat-tile-value risk-${peakRiskLevel}`} style={{ color: `var(--risk-${peakRiskLevel})` }}>
               {formatProbability(highest_skip_probability)}
             </span>
           </div>
 
-          <div className="stat-card">
-            <span className="stat-label">Ghost Bus Alert</span>
+          <div className="inspector-stat-tile">
+            <span className="stat-tile-label">Ghost Bus Alert</span>
             <span
-              className="stat-value"
+              className="stat-tile-value"
               style={{
                 color: high_confidence_alert ? 'var(--risk-high)' : 'var(--risk-low)',
-                fontSize: '1.1rem',
+                fontSize: '0.9rem',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.4rem',
+                gap: '0.3rem',
               }}
             >
               {high_confidence_alert ? (
                 <>
-                  <ShieldAlert size={18} /> ALERT ACTIVE
+                  <ShieldAlert size={14} /> ALERT
                 </>
               ) : (
                 'NORMAL'
@@ -128,30 +119,32 @@ export default function StopRiskDashboard({ data, lastUpdated, isRefreshing, onR
       {/* Alert Banner if High Confidence Alert is triggered */}
       {high_confidence_alert && <AlertBanner />}
 
-      {/* Trips Section */}
+      {/* Scrollable Trips Section */}
       <div className="trips-section">
         <div className="section-header">
           <div className="section-title">
-            <Activity size={18} style={{ color: 'var(--accent-cyan)' }} />
+            <Activity size={15} style={{ color: 'var(--accent-cyan)' }} />
             <span>Live Incoming Trips</span>
             <span className="badge-count">{sortedTrips.length}</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             {isRefreshing && (
-              <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>
-                Syncing live telemetry...
+              <span style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>
+                Syncing...
               </span>
             )}
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              Sorted by Highest Risk First
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              Highest Risk First
             </span>
           </div>
         </div>
 
         {sortedTrips.length > 0 ? (
-          sortedTrips.map((trip) => (
-            <TripCard key={trip.trip_id} trip={trip} stopName={stop_name} />
-          ))
+          <div className="trips-list-container">
+            {sortedTrips.map((trip) => (
+              <TripCard key={trip.trip_id} trip={trip} stopName={stop_name} />
+            ))}
+          </div>
         ) : (
           <NoActiveTripsState stopName={stop_name} />
         )}

@@ -44,10 +44,11 @@ export async function getStopRisk(stopId) {
 }
 
 /**
- * Fetch top active high-risk stops across current live trips.
+ * Fetch active stops dataset across current live trips.
  * Calls GET /api/v1/live-activity?limit=<limit>
+ * Set limit=0 to return all active stops.
  */
-export async function getLiveActivity(limit = 20) {
+export async function getLiveActivity(limit = 0) {
   const url = `${API_BASE_URL}/live-activity?limit=${encodeURIComponent(limit)}`;
   
   const response = await fetch(url);

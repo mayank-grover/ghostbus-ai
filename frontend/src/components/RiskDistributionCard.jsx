@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart3, Info, AlertTriangle } from 'lucide-react';
+import { BarChart3, AlertTriangle } from 'lucide-react';
 
 /**
  * Calculates skip-risk prediction distribution across ALL trips inside stops[].trips[].
@@ -41,17 +41,7 @@ export function calculateRiskDistribution(stops) {
   const highPct = total > 0 ? Math.round((high / total) * 100) : 0;
   const critPct = total > 0 ? Math.round((critical / total) * 100) : 0;
 
-  return {
-    total,
-    low,
-    moderate,
-    high,
-    critical,
-    lowPct,
-    modPct,
-    highPct,
-    critPct,
-  };
+  return { total, low, moderate, high, critical, lowPct, modPct, highPct, critPct };
 }
 
 export default function RiskDistributionCard({ stops, isLoading }) {
@@ -59,125 +49,88 @@ export default function RiskDistributionCard({ stops, isLoading }) {
     calculateRiskDistribution(stops);
 
   return (
-    <div className="glass-panel risk-distribution-card">
-      <div className="dist-card-header">
-        <div className="dist-card-title-group">
-          <BarChart3 size={18} className="dist-header-icon" />
-          <h3 className="dist-card-title">Skip Risk Distribution</h3>
-        </div>
-        <div
-          className="dist-tooltip-wrapper"
-          title="Distribution of current model-predicted skip probabilities across active trips."
-        >
-          <Info size={15} className="dist-info-icon" />
+    <div className="risk-distribution-card">
+      {/* Header */}
+      <div className="pane-header">
+        <div className="pane-title-group">
+          <BarChart3 size={14} className="accent-icon" />
+          <span className="pane-title">Skip Risk Distribution</span>
+          <span className="pane-count">{total.toLocaleString()} predictions</span>
         </div>
       </div>
 
-      <p className="dist-card-subtitle">
-        Distribution of current model-predicted skip probabilities.
-      </p>
+      <div style={{ padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+        {/* Stacked bar */}
+        <div className="dist-bar-track">
+          {total > 0 && (
+            <>
+              {low > 0 && (
+                <div className="dist-bar-segment segment-low" style={{ width: `${(low / total) * 100}%` }} title={`Low: ${lowPct}%`} />
+              )}
+              {moderate > 0 && (
+                <div className="dist-bar-segment segment-moderate" style={{ width: `${(moderate / total) * 100}%` }} title={`Moderate: ${modPct}%`} />
+              )}
+              {high > 0 && (
+                <div className="dist-bar-segment segment-high" style={{ width: `${(high / total) * 100}%` }} title={`High: ${highPct}%`} />
+              )}
+              {critical > 0 && (
+                <div className="dist-bar-segment segment-critical" style={{ width: `${(critical / total) * 100}%` }} title={`Critical: ${critPct}%`} />
+              )}
+            </>
+          )}
+          {total === 0 && (
+            <div style={{ width: '100%', height: '100%', background: 'rgba(255,255,255,0.05)', borderRadius: '99px' }} />
+          )}
+        </div>
 
-      <div className="dist-total-row">
-        <span className="dist-total-count">{total} active predictions</span>
-      </div>
-
-      {/* Horizontal Stacked Bar */}
-      <div className="dist-stacked-bar-container">
-        {total > 0 ? (
-          <div className="dist-stacked-bar">
-            {low > 0 && (
-              <div
-                className="dist-bar-segment segment-low"
-                style={{ width: `${(low / total) * 100}%` }}
-                title={`Low (<25%): ${lowPct}% (${low})`}
-              />
-            )}
-            {moderate > 0 && (
-              <div
-                className="dist-bar-segment segment-moderate"
-                style={{ width: `${(moderate / total) * 100}%` }}
-                title={`Moderate (25-74%): ${modPct}% (${moderate})`}
-              />
-            )}
-            {high > 0 && (
-              <div
-                className="dist-bar-segment segment-high"
-                style={{ width: `${(high / total) * 100}%` }}
-                title={`High (75-98%): ${highPct}% (${high})`}
-              />
-            )}
-            {critical > 0 && (
-              <div
-                className="dist-bar-segment segment-critical"
-                style={{ width: `${(critical / total) * 100}%` }}
-                title={`Critical (≥99%): ${critPct}% (${critical})`}
-              />
-            )}
+        {/* 4-column grid */}
+        <div className="dist-grid-4col">
+          <div className="dist-col-item">
+            <div className="dist-col-header">
+              <span className="dist-dot dot-low" />
+              <span>Low</span>
+            </div>
+            <span className="dist-col-value">{lowPct}%</span>
+            <span className="dist-col-sub">{low.toLocaleString()}</span>
           </div>
-        ) : (
-          <div className="dist-stacked-bar empty">
-            <div className="dist-bar-segment segment-empty" style={{ width: '100%' }} />
+
+          <div className="dist-col-item">
+            <div className="dist-col-header">
+              <span className="dist-dot dot-moderate" />
+              <span>Moderate</span>
+            </div>
+            <span className="dist-col-value">{modPct}%</span>
+            <span className="dist-col-sub">{moderate.toLocaleString()}</span>
+          </div>
+
+          <div className="dist-col-item">
+            <div className="dist-col-header">
+              <span className="dist-dot dot-high" />
+              <span>High</span>
+            </div>
+            <span className="dist-col-value">{highPct}%</span>
+            <span className="dist-col-sub">{high.toLocaleString()}</span>
+          </div>
+
+          <div className="dist-col-item">
+            <div className="dist-col-header">
+              <span className="dist-dot dot-critical" />
+              <span>Critical</span>
+            </div>
+            <span className="dist-col-value risk-crit-text">{critPct}%</span>
+            <span className="dist-col-sub">{critical.toLocaleString()}</span>
+          </div>
+        </div>
+
+        {/* Critical alert strip */}
+        {critical > 0 && (
+          <div className="dist-alert-strip">
+            <AlertTriangle size={12} />
+            <span>
+              <strong>{critical.toLocaleString()}</strong> active {critical === 1 ? 'trip' : 'trips'} at ≥99% skip risk
+            </span>
           </div>
         )}
-      </div>
-
-      {/* Legend / Bucket List */}
-      <div className="dist-bucket-list">
-        <div className="dist-bucket-item">
-          <div className="dist-bucket-left">
-            <span className="dist-dot dot-low"></span>
-            <span className="dist-bucket-name">Low (&lt;25%)</span>
-          </div>
-          <div className="dist-bucket-right">
-            <span className="dist-bucket-pct">{lowPct}%</span>
-            <span className="dist-bucket-sep">·</span>
-            <span className="dist-bucket-count">{low}</span>
-          </div>
-        </div>
-
-        <div className="dist-bucket-item">
-          <div className="dist-bucket-left">
-            <span className="dist-dot dot-moderate"></span>
-            <span className="dist-bucket-name">Moderate (25–74%)</span>
-          </div>
-          <div className="dist-bucket-right">
-            <span className="dist-bucket-pct">{modPct}%</span>
-            <span className="dist-bucket-sep">·</span>
-            <span className="dist-bucket-count">{moderate}</span>
-          </div>
-        </div>
-
-        <div className="dist-bucket-item">
-          <div className="dist-bucket-left">
-            <span className="dist-dot dot-high"></span>
-            <span className="dist-bucket-name">High (75–98%)</span>
-          </div>
-          <div className="dist-bucket-right">
-            <span className="dist-bucket-pct">{highPct}%</span>
-            <span className="dist-bucket-sep">·</span>
-            <span className="dist-bucket-count">{high}</span>
-          </div>
-        </div>
-
-        <div className="dist-bucket-item">
-          <div className="dist-bucket-left">
-            <span className="dist-dot dot-critical"></span>
-            <span className="dist-bucket-name">Critical (≥99%)</span>
-          </div>
-          <div className="dist-bucket-right">
-            <span className="dist-bucket-pct">{critPct}%</span>
-            <span className="dist-bucket-sep">·</span>
-            <span className="dist-bucket-count">{critical}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Summary Highlight */}
-      <div className={`dist-summary-pill ${critical > 0 ? 'alert-active' : ''}`}>
-        {critical > 0 && <AlertTriangle size={14} className="dist-alert-icon" />}
-        <span>
-          <strong>{critical}</strong> {critical === 1 ? 'prediction' : 'predictions'} at ≥99% risk
-        </span>
       </div>
     </div>
   );
