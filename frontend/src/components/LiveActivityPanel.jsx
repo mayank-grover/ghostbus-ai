@@ -109,7 +109,15 @@ export default function LiveActivityPanel({ onSelectStop, currentStopId }) {
           {stops.map((stop) => {
             const riskLevel = getRiskLevel(stop.highest_skip_probability);
             const isSelected = currentStopId === stop.stop_id;
-            const routeShortName = stop.top_trip?.route_short_name || stop.top_trip?.route_id || 'Bus';
+            const topTrip = stop.trips?.reduce(
+              (best, trip) =>
+                !best || trip.skip_probability > best.skip_probability
+                  ? trip
+                  : best,
+              null
+            );
+            const routeShortName =
+              topTrip?.route_short_name || topTrip?.route_id || 'Bus';
 
             return (
               <button

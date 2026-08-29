@@ -80,9 +80,21 @@ async def refresh_live_activity_cache():
             if stop_id not in stop_predictions:
                 stop_predictions[stop_id] = []
 
+            route_metadata = gtfs_lookup.get_route_metadata(feature["route_id"])
+
             stop_predictions[stop_id].append({
                 "trip_id": feature["trip_id"],
                 "route_id": feature["route_id"],
+                "route_short_name": (
+                    route_metadata["route_short_name"]
+                    if route_metadata
+                    else feature["route_id"]
+                ),
+                "route_long_name": (
+                    route_metadata["route_long_name"]
+                    if route_metadata
+                    else "Active Trip"
+                ),
                 "skip_probability": result["skip_probability"],
                 "high_confidence_alert": result["high_confidence_alert"],
             })
